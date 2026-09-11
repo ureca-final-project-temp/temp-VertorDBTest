@@ -1,41 +1,47 @@
 # 현재 실험 프로토콜
 
-이 문서가 실험 실행의 기준 문서입니다. 과거 단일 HNSW 결과 문서보다 우선합니다.
+현재 기준은 2026-09-11에 완료한 **T01~T28 전체 실행**입니다. 14개 DB·엔진·인덱스 조합을 3회 재구축해 42개 인덱스 수명주기와 84개 케이스 결과를 기록했습니다. 결과와 회차별 해석은 [전체 실행 보고서](../07-results/matrix-results-20260911.md)를 확인합니다. 과거 단일 HNSW 결과와 일부 어댑터 스모크는 이번 전체 결과를 대신하지 않습니다.
 
-## Stage 1 — Harness 검증
+## 목적과 고정 조건
 
-1. query type을 보존하는 SHA-256 층화 분할로 calibration 100 / evaluation 200을 고정한다.
-2. ANN 파라미터 후보는 calibration의 무필터 query로만 선택한다.
-3. warm-up, 최종 Recall, p50/p95/p99, QPS는 evaluation query로만 측정한다.
-4. QPS 타이머는 모든 검색 응답 수집 직후 종료하고 Recall 계산은 이후 수행한다.
-5. adapter contract test와 실제 DB 수명주기 스모크를 모두 통과시킨다.
+같은 고정 벡터에서 목표 Recall 0.90/0.95 주변의 검색 성능과 비용을 비교합니다. 특정 제품을 30ms·2GiB 같은 서비스 요건으로 합격·탈락시키는 실험이 아닙니다.
 
-## Stage 2 — 통계적 안정성
+| 항목 | 이번 실행 조건 |
+|---|---|
+| 문서 벡터 | 합성 청크 10,000건, BGE-M3 dense 1024차원 |
+| 거리와 반환 개수 | COSINE, Top-10 |
+| 질의 분할 | 유형을 보존하는 SHA-256 고정 분할: calibration 100 / evaluation 200 |
+| 목표와 허용오차 | 0.90와 0.95, 각 목표 ±0.01 |
+| 부하 | concurrency 10, warm-up 1회, 측정 5회 |
+| DB 자원 상한 | 4 vCPU / 8 GiB / swap 없음; Milvus는 본체·etcd·MinIO 합계 |
+| 반복 | 14조합 × 전체 재구축 3회; 각 재구축에서 두 목표 측정 |
+| 평가 검색 | 케이스별 200 × 5 = 1,000회, 전체 84,000회; 튜닝·warm-up 제외 |
+| DB 순서 | `P-Q-W-M-O`, `W-O-P-Q-M`, `M-Q-O-W-P` |
 
-- 각 index 조합을 3~5회 전체 재구축한다.
-- 기본 3회 DB 순서는 `P-Q-W-M-O`, `W-O-P-Q-M`, `M-Q-O-W-P`다.
-- 최종 표는 Recall 평균/min/max, median p95, median QPS를 사용한다.
-- Milvus는 선택된 같은 파라미터로 calibration query를 serial과 본 concurrency에서 각각 3회 재측정한다. index/load/query-segment 상태를 진단 전후 저장하며, 회차 간 evaluation Recall range도 기본 0.05 이하여야 한다. 어느 진단이든 미통과면 shortlist에서 제외한다.
+## 파라미터 선택과 평가
 
-## Stage 3 — 현실성 검증
+1. 같은 문서 벡터를 적재하고 해당 어댑터의 준비 절차를 완료합니다.
+2. Java Exact 검색으로 같은 벡터·필터의 정답을 계산합니다.
+3. calibration의 무필터 질의로 탐색 파라미터 후보를 측정합니다. 목표 ±0.01 안의 첫 후보를 선택하며, 없으면 가장 가까운 후보와 `CLOSEST_AVAILABLE`을 기록합니다.
+4. evaluation 질의로 warm-up과 최종 측정을 수행합니다. 무필터 평가 Recall인 `comparisonRecall`이 주 비교값이고 `targetMet`은 이 값의 목표 범위 충족 여부입니다.
+5. 필터 유무별 Recall·지연시간을 구분하고 QPS는 두 종류가 섞인 전체 평가 검색 처리량으로 기록합니다. 검색 타이머를 종료한 뒤 Recall을 후처리합니다.
 
-- 10k 결과로 2~3개 index 조합만 shortlist한다.
-- 실제로 임베딩한 100k 입력으로 확대하고, 자원이 허용되면 1M을 추가한다. 행 복제나 벡터 복제로 규모를 가장하지 않는다.
-- 실제 FAQ/chunk metadata, query 길이·유형 분포를 반영한 non-synthetic 입력을 별도 실행한다.
-- 필터 query는 실제 1%/10%/50% 선택도를 갖는 세 workload로 분리한다.
+calibration의 목표 충족은 evaluation의 목표 충족을 보장하지 않습니다. `CLOSEST_AVAILABLE`이나 `targetMet=false`도 실행 실패로 지우지 않고 해당 설정의 관측 결과로 남깁니다.
 
-## Stage 4 — 최종 shortlist
+## 반복 결과와 안정성
 
-기본 규칙은 다음과 같다.
+각 조합의 Recall 평균·최소·최대, 목표 충족 횟수, unfiltered p95 중앙값, 혼합 QPS 중앙값, CPU·RAM·준비 비용을 함께 봅니다. 같은 목표에서도 실제 Recall이 다르면 속도 차이와 함께 표시합니다. 평균이 목표 범위 안이라는 사실만으로 세 실행 모두 목표를 충족했다고 말하지 않습니다.
 
-- Recall@10 평균 ≥ 0.95
-- median unfiltered p95 ≤ 30ms
-- median peak RAM ≤ 2GiB
-- 요청한 반복 횟수 완료
-- stability 진단 통과
+현재 Milvus에는 같은 calibration 질의와 선택 파라미터를 직렬·동시성 검색으로 각각 3회 재확인하는 추가 진단이 있습니다. index/load/query-segment 상태를 전후 저장하며, 기존 집계는 재구축 간 평가 Recall range 0.05도 검사합니다. 다른 어댑터에는 이 진단이 필수로 적용되지 않습니다. 따라서 `stability_verified=true`를 모든 DB에서 동일한 검증 통과로 읽지 않으며, 이번 보고서는 모든 조합의 실제 회차 간 변동을 직접 설명합니다.
 
-필요하면 실행 인자로 문턱을 바꾸되 결과에 기준을 함께 보관한다. 목표 `±0.01`은 같은 품질점 비교를 위한 조건이고, Recall 하한은 제품 shortlist 조건이다.
+## 기존 집계 필드의 지위
 
-## Stage 5 — 제품 결정
+실행 스크립트는 기존 계산과 결과 호환성을 위해 `passes_recall_floor`, `passes_p95`, `passes_ram`, `eligible`을 계속 출력합니다. 해당 기본 계산에는 평균 Recall ≥0.95, unfiltered p95 중앙값 ≤30ms, peak RAM 중앙값 ≤2GiB, 반복 완료와 기존 안정성 조건이 들어갑니다.
 
-통과 후보끼리 운영 복잡도, 원본 DB와 벡터 DB 간 정합성, 백업·복구, 관측성, scale-out 필요성을 비교한다. 더 작은 단일 p95만으로 제품을 선정하지 않는다.
+**이번 보고서는 이 legacy 필드를 제품 선정·탈락 조건으로 사용하지 않습니다.** 이 수치들은 이번 비교에 적용하는 품질·성능 판정 조건과 구분합니다. 0.90 목표를 정확히 맞춰도 Recall 하한을 통과할 수 없고, OpenSearch의 기본 4GiB heap 구성은 2GiB 필터와 맞지 않습니다. 세부 계산식은 [결과 형식](../06-implementation/result-format.md), 해석 원칙은 [비교 결과 해석 기준](../07-results/decision.md)에 보존합니다.
+
+## 이번 실행에서 확인하지 않은 범위
+
+이번 84회는 10k 합성 데이터의 비교입니다. 실제 임베딩 100k/1M, 실제 FAQ·질의 분포의 non-synthetic 데이터, 별도 1%/10%/50% 필터 선택도 workload는 이 결과에 포함되지 않았습니다. 관련 스크립트가 존재한다는 사실은 검증 완료를 뜻하지 않습니다.
+
+향후 제품을 결정할 때는 실제 서비스의 품질·지연시간·자원·정합성·복구 요구사항을 먼저 정하고 별도 검증 결과와 함께 판단합니다. 이번 결과의 특정 `eligible` 값이나 단일 최저 p95로 그 결정을 대신하지 않습니다.

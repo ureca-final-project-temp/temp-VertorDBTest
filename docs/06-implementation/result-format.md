@@ -1,5 +1,7 @@
 # 결과 형식
 
+현재 결과의 기준은 [2026-09-11 T01~T28 전체 실행 보고서](../07-results/matrix-results-20260911.md)입니다. 42회 인덱스 재구축과 84회 케이스 실행을 완료했습니다. 이 문서는 저장 형식을 설명하며, 기존 `eligible` 필드를 이번 보고서의 제품 선정 조건으로 사용하지 않습니다.
+
 ## 디렉터리
 
 ```text
@@ -37,10 +39,10 @@ CSV schema가 기존 파일과 다르면 이어 쓰지 않고 중단합니다. �
 | `indexSizeBytes` | 제품에서 분리 측정 가능한 인덱스 크기. 미지원 -1 |
 | `indexBuildTimeMs` | drop/create부터 적재·flush/refresh·ready까지 |
 | `upsertTimeMs` | 적재 API 구간 |
-| `stabilityDiagnostics` | Milvus serial/concurrent 표본과 전후 index/load/segment 상태 |
+| `stabilityDiagnostics` | Milvus serial/concurrent 표본과 전후 index/load/segment 상태. 다른 어댑터의 required=false는 진단 미실시 |
 | `environment` | 입력 SHA-256, query split SHA-256, Docker 제한, 실행 환경 |
 
-QPS 타이머 종료 후 Recall을 계산하므로 QPS와 latency는 같은 순수 검색 workload를 설명합니다.
+QPS 타이머 종료 후 Recall을 계산합니다. QPS는 필터·무필터가 섞인 전체 평가 검색의 처리량이고, 주 비교 p95는 무필터 구간입니다. Store 호출 시간에는 클라이언트 변환·통신·응답 처리도 들어가므로 DB 엔진 내부 시간만을 뜻하지 않습니다.
 
 ## CSV 컬럼
 
@@ -64,12 +66,27 @@ JSON 객체는 CSV에서 인용된 JSON 문자열입니다.
 
 - completed runs
 - comparison Recall average/min/max
-- median unfiltered p95와 QPS
-- median CPU/RAM/index size/index build time
+- median unfiltered p95와 혼합 QPS
+- median average CPU, 전체 회차 peak CPU 최댓값, median RAM/index size/index build time
 - `within_target_tolerance`: Recall 평균이 해당 목표 ±0.01인지
-- `passes_recall_floor`: Recall 평균이 의사결정 하한(기본 0.95) 이상인지
 - `rebuild_recall_range`: 재구축 회차 간 comparison Recall max-min
-- `stability_verified`: 모든 회차의 같은-index drift 진단과, 필수 대상의 rebuild Recall range ≤0.05를 모두 통과했는지
-- `eligible`: 반복 완료와 Recall/p95/RAM/stability 규칙을 모두 통과했는지
 
-단일 실행 행의 `targetMet`과 반복 집계의 `within_target_tolerance`을 혼동하지 않습니다.
+단일 실행 행의 `targetMet`과 반복 집계의 `within_target_tolerance`를 혼동하지 않습니다. 후자는 평균만 검사하며 개별 실행의 목표 충족 횟수는 원시 행의 `targetMet`에서 별도로 계산합니다. 중앙값 p95/RAM도 모든 회차의 최댓값을 제한하는 판정이 아닙니다.
+
+## 호환·기록용 legacy 판정 필드
+
+아래 필드는 현재 실행 스크립트가 기존 계산식을 유지해 출력하는 값입니다. **이번 84회 보고서의 제품 선정·탈락에는 사용하지 않습니다.** 기본 임계값은 이 비교 프로토콜의 품질·성능 판정 조건과 구분합니다.
+
+| 필드 | 현재 코드의 계산 |
+|---|---|
+| `passes_recall_floor` | comparison Recall 평균 ≥ `DecisionRecallMinimum` (기본 0.95) |
+| `passes_p95` | unfiltered p95 중앙값 ≤ `DecisionP95LimitMs` (기본 30ms) |
+| `passes_ram` | peak RAM 중앙값 ≤ `DecisionRamLimitBytes` (기본 2GiB) |
+| `per_run_stability_verified` | 모든 행의 `stability_verified`가 true |
+| `rebuild_stability_verified` | 필수 진단 대상이면 Recall range ≤0.05, 비대상이면 true |
+| `stability_verified` | 위 두 안정성 집계값의 AND |
+| `eligible` | 반복 완료 AND Recall 하한 AND p95 AND RAM AND 기존 stability 조건 |
+
+`targetMet`과 `within_target_tolerance`는 `eligible` 계산에 직접 들어가지 않습니다. 따라서 목표 0.90을 충족해도 Recall 하한에는 미달할 수 있고, 반대로 목표를 크게 초과한 행도 하한은 통과할 수 있습니다.
+
+필수 안정성 진단은 현재 Milvus에만 적용됩니다. 다른 DB의 true는 동일한 진단 통과를 의미하지 않으므로 모든 DB의 회차별 변동을 원시 값으로 확인해야 합니다. OpenSearch는 기본 4GiB heap으로 측정했으므로 2GiB 메모리 필터 결과를 제품의 최소 운영 메모리 검증으로 읽지 않습니다. [비교 결과 해석 기준](../07-results/decision.md)에 구체적인 구분을 정리했습니다.

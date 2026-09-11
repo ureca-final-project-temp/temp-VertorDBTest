@@ -1,9 +1,9 @@
 package com.myapp.infrastructure.vector.pgvector;
 
-import com.myapp.domain.vector.DistanceMetric;
 import com.myapp.port.VectorIndexManager;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.time.Duration;
 import java.util.Map;
 
 public class PgVectorIndexManager implements VectorIndexManager {
@@ -41,7 +41,14 @@ public class PgVectorIndexManager implements VectorIndexManager {
     }
 
     @Override
+    public void rebuild() {
+        validateIndexConfiguration();
+        VectorIndexManager.super.rebuild();
+    }
+
+    @Override
     public void create() {
+        validateIndexConfiguration();
         String table = properties.getTable();
         jdbcTemplate.execute("CREATE EXTENSION IF NOT EXISTS vector");
         jdbcTemplate.execute("""
@@ -58,11 +65,23 @@ public class PgVectorIndexManager implements VectorIndexManager {
             jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS " + indexName() + " ON " + table
                     + " USING hnsw (embedding " + operatorClass() + ") WITH (m = " + properties.getHnswM()
                     + ", ef_construction = " + properties.getEfConstruction() + ")");
-        } else {
-            if (properties.getIvfLists() < 1) throw new IllegalStateException("ivf-lists must be positive");
-            jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS " + indexName() + " ON " + table
-                    + " USING ivfflat (embedding " + operatorClass() + ") WITH (lists = " + properties.getIvfLists() + ")");
         }
+    }
+
+    @Override
+    public void awaitReady(long expectedVectorCount, Duration timeout) {
+        if (!indexType().equals("ivfflat")) return;
+        validateIndexConfiguration();
+        String table = properties.getTable();
+        Long storedVectors = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + table, Long.class);
+        if (expectedVectorCount < 1 || storedVectors == null || storedVectors != expectedVectorCount) {
+            throw new IllegalStateException("IVFFlat training requires the complete nonempty dataset: expected "
+                    + expectedVectorCount + " vectors but table has " + storedVectors);
+        }
+        // IVFFlat learns its centroids during CREATE INDEX, so the benchmark's upsert
+        // must finish before this synchronous readiness barrier builds the index.
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS " + indexName() + " ON " + table
+                + " USING ivfflat (embedding " + operatorClass() + ") WITH (lists = " + properties.getIvfLists() + ")");
     }
 
     @Override
@@ -94,6 +113,12 @@ public class PgVectorIndexManager implements VectorIndexManager {
 
     private String indexName() {
         return properties.getTable() + "_" + indexType() + "_idx";
+    }
+
+    private void validateIndexConfiguration() {
+        if (indexType().equals("ivfflat") && properties.getIvfLists() < 1) {
+            throw new IllegalStateException("ivf-lists must be positive");
+        }
     }
 
     private String operatorClass() {

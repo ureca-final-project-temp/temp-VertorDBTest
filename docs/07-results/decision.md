@@ -1,36 +1,42 @@
-# Decision Guide
+# 비교 결과 해석 기준
 
-과거 단일 실행 숫자는 현재 제품 순위표가 아닙니다. 새 프로토콜의 `summary/vector-db-summary.csv`에서 반복 완료 행만 사용합니다.
+현재 비교 자료는 [2026-09-11 T01~T28 전체 실행 보고서](matrix-results-20260911.md)입니다. 14개 조합의 두 Recall 목표를 3회씩 측정한 84개 결과를 해석합니다. 이 문서는 실행 결과를 비교하는 범위와 저장된 집계 필드의 해석을 정의합니다.
 
-## 성능 gate
+## 이번 보고서에서 비교하는 것
 
-기본 `eligible`은 다음을 모두 요구합니다.
+| 관점 | 확인할 값 | 해석 |
+|---|---|---|
+| 검색 품질 | evaluation `comparisonRecall` 평균·최소·최대, 목표 충족 횟수 | 0.90/0.95 목표 각각의 실제 도달 정도 |
+| 지연과 처리량 | unfiltered p95 중앙값, 혼합 QPS 중앙값 | 실제 Recall과 함께 비교; 서로 다른 모집단 구분 |
+| 자원과 준비 비용 | CPU·RAM·index size·time-to-index-ready | 표본과 DB별 측정 범위 차이를 함께 표시 |
+| 반복 변동 | 회차별 Recall·탐색값·calibration Recall | 파라미터 재선정과 재구축을 포함한 전체 실행의 변동 |
 
-1. comparison Recall 평균 ≥ 0.95
-2. median unfiltered p95 ≤ 30ms
-3. median peak RAM ≤ 2GiB
-4. 요청한 3~5회 재구축 완료
-5. stability 진단 통과
+`targetMet`은 개별 실행이 목표 ±0.01에 도달했는지를 뜻합니다. 목표 미충족은 관측한 결과이며 자동으로 실행 버그나 제품 부적합을 뜻하지 않습니다. 목표를 충족한 실행끼리도 실제 Recall 차이는 남으므로 지연시간만으로 전체 순위를 확정하지 않습니다.
 
-`within_target_tolerance`는 같은 품질점 비교 가능 여부이고 `passes_recall_floor`는 제품 shortlist 하한입니다. calibration에서 범위를 맞췄어도 evaluation `target_met=false`일 수 있습니다.
+## legacy `eligible` 필드는 왜 남아 있는가
 
-## 현실성 gate
+현재 스크립트는 기존 집계 형식과 실행 기록을 보존하면서 다음 기본 규칙을 계속 계산합니다.
 
-성능 gate 다음에 다음 결과가 있어야 합니다.
+1. 요청한 반복 횟수 완료
+2. comparison Recall 평균 ≥0.95
+3. unfiltered p95 중앙값 ≤30ms
+4. peak RAM 중앙값 ≤2GiB
+5. 기존 코드의 안정성 조건 충족
 
-- 1%/10%/50% 실제 선택도별 filtered Recall/p95
-- shortlist 2~3개의 실제 100k, 가능하면 1M 결과
-- 실제 FAQ/chunk/query 길이·유형 분포의 non-synthetic 결과
-- 재구축·장애복구·백업복구와 허용 RPO/RTO
+이 계산 결과는 `passes_*`, `eligible`에 남지만 **이번 보고서의 제품 선정·탈락 판정에는 사용하지 않습니다.** 30ms·2GiB·Recall 하한은 이 비교 프로토콜의 판정 조건과 구분합니다.
 
-## 운영 결정
-
-| 관점 | 질문 |
+| 구분해야 할 점 | 현재 계산의 의미 |
 |---|---|
-| 정합성 | PostgreSQL 원본과 별도 vector store 사이 outbox/retry/reconciliation을 운영할 수 있는가 |
-| 복잡도 | 팀이 새 cluster, upgrade, monitoring, backup을 감당할 수 있는가 |
-| 복구 | 전체 재색인 시간과 검색 불가 구간이 SLO 안인가 |
-| 확장 | 3년 데이터량과 tenant/write/read 비율에서 scale-out이 실제 필요한가 |
-| 검색 제품성 | lexical/hybrid/rerank가 필요한가, pure vector 성능과 분리해 검증했는가 |
+| 0.90 목표와 평균 0.95 하한 | 0.90±0.01을 맞춘 결과는 하한을 통과하지 못함. 해당 케이스의 비교 실패라는 뜻은 아님 |
+| 0.95 목표와 평균 0.95 하한 | 0.94는 목표 범위에 들지만 하한 미충족, 0.97은 목표 범위 밖이지만 하한 충족 가능 |
+| 평균·중앙값과 개별 실행 | `eligible=true`여도 모든 실행이 Recall 하한·목표 범위·지연·RAM 한도를 지켰다는 뜻이 아님 |
+| OpenSearch 메모리 | 기본 `-Xms4g -Xmx4g` 설정의 관측 RAM에 2GiB 필터를 적용한 결과이며, 2GiB에 맞춰 구성한 제품 검증은 아님 |
+| 안정성 적용 범위 | 필수 진단과 재구축 range 제한은 현재 Milvus에 적용. 다른 DB의 true는 같은 검사를 수행했다는 증거가 아님 |
 
-PostgreSQL 단일 운영으로 gate를 만족한다면 별도 DB의 동기화·복구 비용을 정당화해야 합니다. 성능이 비슷한 후보는 작은 단일 p95가 아니라 위 운영 비용으로 결정합니다.
+예를 들어 이번 T06은 legacy `eligible=true`지만 개별 comparison Recall은 0.944444~0.970000입니다. 평균 기준 통과와 모든 회차의 품질 보장은 다릅니다. 해당 값들을 숨기거나 임계값에 맞춰 원시 결과를 변경하지 않습니다.
+
+## 제품 판단에 남아 있는 정보
+
+이번 10k 합성 데이터에서 곧바로 운영 제품을 확정하지 않습니다. 실제 서비스의 품질 목표, 허용 지연·메모리 예산, 원본과 벡터의 정합성, 운영 인력, 복구 요구를 따로 정의해야 합니다.
+
+실제 100k/1M 벡터, non-synthetic FAQ·질의, 별도 필터 선택도별 부하, 장애·백업 복구 검증은 이번 84회 결과에 포함되지 않았습니다. 관련 실행 명령은 [벤치마크 실행](../04-quickstart/run-benchmark.md)에 있지만 이번 검증 완료 항목이나 선정 결과로 제시하지 않습니다.
