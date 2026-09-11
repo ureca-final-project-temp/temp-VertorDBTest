@@ -17,6 +17,7 @@ services:
     shm_size: ${POSTGRES_SHM_SIZE:-1gb}
     cpus: ${VECTOR_CPU_LIMIT:-4.0}
     mem_limit: ${VECTOR_MEMORY_LIMIT:-8g}
+    memswap_limit: ${VECTOR_MEMORY_LIMIT:-8g}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vector} -d ${POSTGRES_DB:-vectorlab}"]
       interval: 5s
@@ -37,6 +38,7 @@ services:
       - qdrant_data:/qdrant/storage
     cpus: ${VECTOR_CPU_LIMIT:-4.0}
     mem_limit: ${VECTOR_MEMORY_LIMIT:-8g}
+    memswap_limit: ${VECTOR_MEMORY_LIMIT:-8g}
     networks:
       - vector-net
 
@@ -57,6 +59,7 @@ services:
       CLUSTER_HOSTNAME: "node1"
     cpus: ${VECTOR_CPU_LIMIT:-4.0}
     mem_limit: ${VECTOR_MEMORY_LIMIT:-8g}
+    memswap_limit: ${VECTOR_MEMORY_LIMIT:-8g}
     networks:
       - vector-net
 
@@ -81,6 +84,7 @@ services:
       - milvus_etcd_data:/etcd
     cpus: ${MILVUS_ETCD_CPU_LIMIT:-0.5}
     mem_limit: ${MILVUS_ETCD_MEMORY_LIMIT:-512m}
+    memswap_limit: ${MILVUS_ETCD_MEMORY_LIMIT:-512m}
     healthcheck:
       test: ["CMD", "etcdctl", "endpoint", "health"]
       interval: 10s
@@ -105,6 +109,7 @@ services:
       - milvus_minio_data:/minio_data
     cpus: ${MILVUS_MINIO_CPU_LIMIT:-0.5}
     mem_limit: ${MILVUS_MINIO_MEMORY_LIMIT:-1g}
+    memswap_limit: ${MILVUS_MINIO_MEMORY_LIMIT:-1g}
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
@@ -135,8 +140,12 @@ services:
         condition: service_healthy
       milvus-minio:
         condition: service_healthy
-    cpus: ${VECTOR_CPU_LIMIT:-4.0}
-    mem_limit: ${VECTOR_MEMORY_LIMIT:-8g}
+    # The Milvus deployment budget includes Milvus + etcd + MinIO. With the
+    # defaults below their aggregate is the same 4 vCPU / 8 GiB as every
+    # single-container database.
+    cpus: ${MILVUS_CPU_LIMIT:-3.0}
+    mem_limit: ${MILVUS_MEMORY_LIMIT:-6656m}
+    memswap_limit: ${MILVUS_MEMORY_LIMIT:-6656m}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
       interval: 10s
@@ -164,6 +173,7 @@ services:
       - opensearch_data:/usr/share/opensearch/data
     cpus: ${VECTOR_CPU_LIMIT:-4.0}
     mem_limit: ${VECTOR_MEMORY_LIMIT:-8g}
+    memswap_limit: ${VECTOR_MEMORY_LIMIT:-8g}
     ulimits:
       memlock:
         soft: -1

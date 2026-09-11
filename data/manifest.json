@@ -34,10 +34,12 @@
     "top_k": 10,
     "distance_metric": "cosine (or the exact metric/normalization chosen for your BGE-M3 pipeline; keep identical across DBs)",
     "ann_recall_targets": [
+      0.8,
       0.9,
-      0.95,
-      0.99
+      0.95
     ],
+    "ann_recall_tolerance": 0.01,
+    "auxiliary_recall_targets": [0.7, 0.99],
     "note": "Generate document/query embeddings once and reuse the exact same float vectors in every Vector DB."
   }
 }

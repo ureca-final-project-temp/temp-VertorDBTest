@@ -4,6 +4,16 @@
     {
       "database": "",
       "indexType": "hnsw",
+      "targetRecall": 0.80,
+      "topK": 3,
+      "concurrency": 2,
+      "warmupIterations": 1,
+      "measurementIterations": 3,
+      "searchParameters": {}
+    },
+    {
+      "database": "",
+      "indexType": "hnsw",
       "targetRecall": 0.90,
       "topK": 3,
       "concurrency": 2,
@@ -15,16 +25,6 @@
       "database": "",
       "indexType": "hnsw",
       "targetRecall": 0.95,
-      "topK": 3,
-      "concurrency": 2,
-      "warmupIterations": 1,
-      "measurementIterations": 3,
-      "searchParameters": {}
-    },
-    {
-      "database": "",
-      "indexType": "hnsw",
-      "targetRecall": 0.99,
       "topK": 3,
       "concurrency": 2,
       "warmupIterations": 1,

@@ -28,6 +28,9 @@ public class BenchmarkEnvironmentCollector {
         values.put("javaVersion", System.getProperty("java.version"));
         values.put("springBootVersion", SpringBootVersion.getVersion());
         values.put("dockerServerVersion", command(List.of("docker", "version", "--format", "{{.Server.Version}}")));
+        values.put("declaredVectorDbBudget", Map.of(
+                "cpuCores", properties.getResourceBudgetCpu(),
+                "memoryBytes", properties.getResourceBudgetMemoryBytes()));
         values.put("containerLimits", containerLimits(properties.getContainerNames()));
         values.put("metric", properties.getMetric().name());
         values.put("documentVectorsSha256", sha256(properties.getDocumentVectors()));
@@ -47,7 +50,8 @@ public class BenchmarkEnvironmentCollector {
         Map<String, String> limits = new LinkedHashMap<>();
         for (String container : containerNames) {
             String value = command(List.of("docker", "inspect", "--format",
-                    "cpuNano={{.HostConfig.NanoCpus}},memoryBytes={{.HostConfig.Memory}}", container));
+                    "cpuNano={{.HostConfig.NanoCpus}},memoryBytes={{.HostConfig.Memory}},memorySwapBytes={{.HostConfig.MemorySwap}}",
+                    container));
             limits.put(container, value);
         }
         return Map.copyOf(limits);

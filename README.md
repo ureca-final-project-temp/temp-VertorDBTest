@@ -16,7 +16,7 @@
 
 - `VectorStore`와 `VectorIndexManager` 뒤에 5개 DB 구현을 분리했다.
 - Exact Top-K는 DB 결과가 아니라 Java brute-force 계산으로 생성한다.
-- 빈 `searchParameters`는 목표 Recall을 만족하는 가장 작은 탐색 후보값을 자동 선택한다.
+- 빈 `searchParameters`는 실제 측정과 같은 동시성으로 후보를 평가해 목표 Recall을 만족하는 가장 작은 탐색값을 자동 선택한다.
 - 측정 타이머는 `VectorStore.search()` 호출만 감싼다. Controller, 임베딩, Ground Truth, 튜닝 시간은 제외한다.
 - PostgreSQL에는 원본 문서/청크용 Flyway 스키마와 Spring Data JDBC 저장 계층이 있다.
 
@@ -106,17 +106,35 @@ Invoke-RestMethod -Method Post `
 4. 앱과 DB의 캐시 조건을 통일한 뒤 다음 DB로 반복한다.
 5. 모든 실행에서 같은 CPU/RAM 제한, Top-K, warm-up, concurrency, 반복 횟수를 유지한다.
 
-제공한 본실험 시나리오는 Top-K 10, concurrency 10, warm-up 1회, 측정 5회이며 DB별 4,500건의 측정 요청을 만든다. 다섯 DB를 순서대로 실행하고 각 DB를 종료하려면 다음 명령을 사용한다.
+제공한 본실험 시나리오는 Target Recall@10 `0.80 / 0.90 / 0.95`(각 `±0.01`), concurrency 10, warm-up 1회, 측정 5회이며 DB별 4,500건의 측정 요청을 만든다. 다섯 DB를 순서대로 실행하고 각 DB를 종료하려면 다음 명령을 사용한다.
 
 ```powershell
 .\gradlew.bat bootJar
 .\scripts\run-all-benchmarks.ps1
 ```
 
+기본 Vector DB 배포 예산은 대상별 합계 `4 vCPU / 8 GiB`다. pgvector, Qdrant, Weaviate, OpenSearch는 단일 컨테이너에 전부 적용하고, Milvus는 본체 `3 vCPU / 6656 MiB`, etcd `0.5 vCPU / 512 MiB`, MinIO `0.5 vCPU / 1 GiB`로 나눈다. `memswap_limit`을 메모리 상한과 같게 설정해 swap 사용도 막는다. 스크립트는 DB 시작 직후 `docker inspect`의 CPU·메모리·swap 합계가 선언 예산과 정확히 같은지 검사하며, 다르면 측정을 시작하지 않는다. 전용 Vector DB 실행에도 필요한 PostgreSQL은 공통 원본 저장소로서 Vector DB 검색 리소스 합계에서는 제외한다.
+
+예산을 바꿀 때는 숫자를 명시한다. Milvus 보조 서비스 몫을 제외한 나머지는 스크립트가 본체에 자동 할당한다.
+
+```powershell
+.\scripts\run-all-benchmarks.ps1 `
+  -DatabaseCpuLimit 4.0 `
+  -DatabaseMemoryLimitBytes 8589934592
+```
+
 일부 DB만 실행할 수도 있다.
 
 ```powershell
 .\scripts\run-all-benchmarks.ps1 -Profiles pgvector,qdrant
+```
+
+0.70과 0.99는 본 비교표에 섞지 않고 필요할 때 별도 보조 실험으로 실행한다.
+
+```powershell
+.\scripts\run-all-benchmarks.ps1 `
+  -RequestFile data/benchmark-request-auxiliary.json `
+  -ResultDirectory benchmark-result/auxiliary
 ```
 
 프로필과 자동 조절 파라미터는 다음과 같다.
@@ -129,7 +147,7 @@ Invoke-RestMethod -Method Post `
 | `milvus` | `ef` | flush 후 index 완료까지 대기 |
 | `opensearch` | `ef_search` | k-NN `method_parameters` |
 
-`searchParameters: {}`이면 `[10,20,40,80,120,200,400,800,1000]`을 오름차순으로 시험한다. 명시값을 쓰려면 예를 들어 pgvector 시나리오에 `"searchParameters":{"ef_search":120}`을 넣는다. 자동 튜닝은 목표 이상을 달성한 최초 후보를 고르므로 결과의 `actualRecall`을 반드시 확인한다. 후보를 모두 써도 목표에 미달할 수 있다.
+`searchParameters: {}`이면 `[10,20,40,80,120,200,400,800,1000]` 전체를 본 측정과 같은 warm-up, 동시성, 반복 횟수로 시험한다. 같은 실행 조건을 가진 여러 목표는 이 후보 측정값을 공유한다. 허용 범위에 들어오는 후보가 있으면 가장 작은 검색 파라미터를 선택한다. 없으면 목표와 튜닝 Recall의 절대 차이가 가장 작은 후보를 선택하고 `recallSelection=CLOSEST_AVAILABLE`로 기록한다. 명시값을 쓰려면 예를 들어 pgvector 시나리오에 `"searchParameters":{"ef_search":120}`을 넣는다.
 
 pgvector 프로필은 작은 데이터에서도 HNSW 실험이 순차 검색으로 바뀌지 않도록 `enable_seqscan=off`를 검색 세션에 설정한다. 운영 쿼리 계획을 그대로 재현하려는 별도 실험에서는 `PGVECTOR_FORCE_INDEX_SCAN=false`로 끄고 실행 계획을 함께 보관한다.
 
@@ -153,7 +171,7 @@ benchmark-result/
 - `peak_memory_bytes`: 같은 대상 컨테이너 메모리 합계의 최대값이다.
 - `disk_write_bytes`: 검색 측정 중 Docker Block I/O write 증가량이다. 전체 볼륨 크기와 다른 값이다.
 - `index_size_bytes`: DB가 직접 제공하는 범위에서 기록하며 미지원은 `-1`이다.
-- CSV와 JSON에는 HNSW 생성 파라미터와 실제 선택된 검색 파라미터가 모두 남는다.
+- CSV와 JSON에는 `recall_tolerance`, 최종 측정의 허용 범위 충족 여부인 `target_met`/`targetMet`, 선택 방식인 `recall_selection`, 튜닝 시 실제값인 `tuning_recall`, HNSW 생성·검색 파라미터가 모두 남는다.
 - 입력 3개 파일의 SHA-256, OS/CPU/RAM, Java/Spring Boot/Docker 버전, 실제 컨테이너 CPU·메모리 제한도 `environment`에 기록한다.
 - SVG는 같은 result directory의 모든 raw 실행을 모아 DB별 색상으로 그린다.
 

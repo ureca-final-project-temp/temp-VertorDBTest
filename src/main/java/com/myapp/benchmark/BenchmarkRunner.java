@@ -79,12 +79,13 @@ public class BenchmarkRunner {
 
         ExactSearchEngine exactSearch = new ExactSearchEngine(documents, properties.getMetric());
         Map<Integer, Map<String, List<VectorSearchResult>>> groundTruthByTopK = new LinkedHashMap<>();
+        Map<TuningProfile, List<RecallTargetSelector.Candidate<Map<String, Object>>>> tuningCache = new LinkedHashMap<>();
         List<BenchmarkResult> results = new ArrayList<>();
         for (BenchmarkScenario scenario : scenarios) {
             Map<String, List<VectorSearchResult>> groundTruth = groundTruthByTopK.computeIfAbsent(
                     scenario.topK(), ignored -> exactGroundTruth(exactSearch, queries, scenario));
             results.add(runScenario(store, indexManager, documents, queries, scenario, groundTruth,
-                    environment, indexBuildTimeMs, upsertTimeMs));
+                    environment, indexBuildTimeMs, upsertTimeMs, tuningCache));
             indexBuildTimeMs = 0;
             upsertTimeMs = 0;
         }
@@ -101,12 +102,14 @@ public class BenchmarkRunner {
             Map<String, List<VectorSearchResult>> groundTruth,
             Map<String, Object> environment,
             long indexBuildTimeMs,
-            long upsertTimeMs
+            long upsertTimeMs,
+            Map<TuningProfile, List<RecallTargetSelector.Candidate<Map<String, Object>>>> tuningCache
     ) {
         resultWriter.writeGroundTruth(groundTruth, scenario.topK(), properties.getResultDirectory());
-        Map<String, Object> effectiveParameters = scenario.searchParameters().isEmpty()
-                ? tuneSearchParameters(store, indexManager, queries, scenario, groundTruth)
-                : scenario.searchParameters();
+        TuningSelection tuning = scenario.searchParameters().isEmpty()
+                ? tuneSearchParameters(store, indexManager, queries, scenario, groundTruth, tuningCache)
+                : new TuningSelection(scenario.searchParameters(), null, "EXPLICIT_PARAMETERS");
+        Map<String, Object> effectiveParameters = tuning.parameters();
         indexManager.configureSearch(effectiveParameters);
         for (int pass = 0; pass < scenario.warmupIterations(); pass++) {
             for (BenchmarkQuery query : queries) store.search(request(query, scenario, effectiveParameters));
@@ -139,8 +142,12 @@ public class BenchmarkRunner {
             LatencyCollector.Statistics stats = latency.statistics();
             double recall = recallValues.stream().mapToDouble(Double::doubleValue).average().orElse(0);
             double qps = tasks.size() / (elapsed / 1_000_000_000.0);
+            double recallTolerance = properties.getTargetRecallTolerance();
             return new BenchmarkResult(
                     store.database(), indexManager.indexType(), scenario.targetRecall(), recall,
+                    recallTolerance,
+                    RecallTargetSelector.withinTolerance(recall, scenario.targetRecall(), recallTolerance),
+                    tuning.strategy(), tuning.tuningRecall(),
                     stats.averageMs(), stats.p50Ms(), stats.p95Ms(), stats.p99Ms(), qps,
                     resourceUsage.averageCpuPercent(), resourceUsage.peakMemoryBytes(), resourceUsage.diskWriteBytes(),
                     indexManager.indexSizeBytes(), indexBuildTimeMs, upsertTimeMs, documents.size(), tasks.size(),
@@ -170,12 +177,13 @@ public class BenchmarkRunner {
         return new VectorSearchRequest(query.embedding(), scenario.topK(), query.filter(), parameters);
     }
 
-    private Map<String, Object> tuneSearchParameters(
+    private TuningSelection tuneSearchParameters(
             VectorStore store,
             VectorIndexManager indexManager,
             List<BenchmarkQuery> queries,
             BenchmarkScenario scenario,
-            Map<String, List<VectorSearchResult>> groundTruth
+            Map<String, List<VectorSearchResult>> groundTruth,
+            Map<TuningProfile, List<RecallTargetSelector.Candidate<Map<String, Object>>>> tuningCache
     ) {
         String key = switch (store.database().toLowerCase()) {
             case "qdrant" -> "hnsw_ef";
@@ -185,24 +193,73 @@ public class BenchmarkRunner {
         List<Integer> candidates = properties.getAutoTuneCandidates() == null
                 ? List.of()
                 : properties.getAutoTuneCandidates().stream()
-                        .filter(candidate -> candidate != null && candidate > 0)
+                        .filter(candidate -> candidate != null && candidate >= scenario.topK())
                         .distinct()
                         .sorted()
                         .toList();
         if (candidates.isEmpty()) {
-            throw new IllegalStateException("benchmark.auto-tune-candidates must contain a positive value");
+            throw new IllegalStateException("benchmark.auto-tune-candidates must contain a value >= topK");
         }
-        Map<String, Object> selected = Map.of(key, Math.max(scenario.topK(), candidates.getLast()));
+        TuningProfile profile = new TuningProfile(
+                scenario.topK(), scenario.concurrency(), scenario.warmupIterations(), scenario.measurementIterations());
+        List<RecallTargetSelector.Candidate<Map<String, Object>>> measured = tuningCache.get(profile);
+        if (measured == null) {
+            measured = measureTuningCandidates(store, indexManager, queries, scenario, groundTruth, key, candidates);
+            tuningCache.put(profile, measured);
+        }
+        RecallTargetSelector.Selection<Map<String, Object>> selection = RecallTargetSelector.select(
+                measured, scenario.targetRecall(), properties.getTargetRecallTolerance());
+        return new TuningSelection(selection.value(), selection.recall(), selection.strategy().name());
+    }
+
+    private List<RecallTargetSelector.Candidate<Map<String, Object>>> measureTuningCandidates(
+            VectorStore store,
+            VectorIndexManager indexManager,
+            List<BenchmarkQuery> queries,
+            BenchmarkScenario scenario,
+            Map<String, List<VectorSearchResult>> groundTruth,
+            String parameterKey,
+            List<Integer> candidates
+    ) {
+        List<RecallTargetSelector.Candidate<Map<String, Object>>> measured = new ArrayList<>(candidates.size());
         for (int candidate : candidates) {
-            if (candidate < scenario.topK()) continue;
-            Map<String, Object> parameters = Map.of(key, candidate);
+            Map<String, Object> parameters = Map.of(parameterKey, candidate);
             indexManager.configureSearch(parameters);
-            double recall = queries.stream().mapToDouble(query -> recallCalculator.recallAtK(
-                    groundTruth.get(query.queryId()), store.search(request(query, scenario, parameters)), scenario.topK())).average().orElse(0);
-            selected = parameters;
-            if (recall >= scenario.targetRecall()) break;
+            for (int pass = 0; pass < scenario.warmupIterations(); pass++) {
+                for (BenchmarkQuery query : queries) store.search(request(query, scenario, parameters));
+            }
+            double recall = recallUnderMeasurementConcurrency(store, queries, scenario, groundTruth, parameters);
+            measured.add(new RecallTargetSelector.Candidate<>(parameters, recall));
         }
-        return selected;
+        return List.copyOf(measured);
+    }
+
+    private double recallUnderMeasurementConcurrency(
+            VectorStore store,
+            List<BenchmarkQuery> queries,
+            BenchmarkScenario scenario,
+            Map<String, List<VectorSearchResult>> groundTruth,
+            Map<String, Object> parameters
+    ) {
+        List<Callable<Double>> tasks = new ArrayList<>(queries.size() * scenario.measurementIterations());
+        for (int pass = 0; pass < scenario.measurementIterations(); pass++) {
+            for (BenchmarkQuery query : queries) {
+                tasks.add(() -> recallCalculator.recallAtK(
+                        groundTruth.get(query.queryId()),
+                        store.search(request(query, scenario, parameters)),
+                        scenario.topK()));
+            }
+        }
+        try (ExecutorService executor = Executors.newFixedThreadPool(scenario.concurrency())) {
+            List<Double> recalls = new ArrayList<>(tasks.size());
+            for (Future<Double> future : executor.invokeAll(tasks)) recalls.add(future.get());
+            return recalls.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Benchmark auto-tuning was interrupted", exception);
+        } catch (ExecutionException exception) {
+            throw new IllegalStateException("A vector search failed during auto-tuning", exception.getCause());
+        }
     }
 
     private void upsertInBatches(VectorStore store, List<VectorDocument> documents) {
@@ -214,6 +271,10 @@ public class BenchmarkRunner {
     }
 
     private void validateScenarios(List<BenchmarkScenario> scenarios, VectorStore store, VectorIndexManager manager) {
+        double tolerance = properties.getTargetRecallTolerance();
+        if (!Double.isFinite(tolerance) || tolerance < 0 || tolerance > 1) {
+            throw new IllegalStateException("benchmark.target-recall-tolerance must be in [0, 1]");
+        }
         for (BenchmarkScenario scenario : scenarios) {
             if (scenario.database() != null && !scenario.database().isBlank() && !scenario.database().equalsIgnoreCase(store.database())) {
                 throw new IllegalArgumentException("Scenario database does not match active store: " + store.database());
@@ -256,5 +317,11 @@ public class BenchmarkRunner {
     }
 
     public record RunOutput(List<BenchmarkResult> results, ResultWriter.Artifacts artifacts) {
+    }
+
+    private record TuningSelection(Map<String, Object> parameters, Double tuningRecall, String strategy) {
+    }
+
+    private record TuningProfile(int topK, int concurrency, int warmupIterations, int measurementIterations) {
     }
 }

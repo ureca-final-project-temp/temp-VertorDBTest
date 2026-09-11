@@ -2,7 +2,12 @@
 param(
     [ValidateSet('pgvector', 'qdrant', 'weaviate', 'milvus', 'opensearch')]
     [string[]]$Profiles = @('pgvector', 'qdrant', 'weaviate', 'milvus', 'opensearch'),
-    [string]$ResultDirectory = 'benchmark-result/production',
+    [string]$ResultDirectory = 'benchmark-result/primary-recall',
+    [string]$RequestFile = 'data/benchmark-request.json',
+    [ValidateRange(1.1, 128.0)]
+    [double]$DatabaseCpuLimit = 4.0,
+    [ValidateRange(1610612737, 1099511627776)]
+    [long]$DatabaseMemoryLimitBytes = 8589934592,
     [int]$ApplicationPort = 18086
 )
 
@@ -10,8 +15,30 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $projectRoot
 
+# Milvus needs two supporting services. Their limits are part of, not in
+# addition to, the database deployment budget.
+$milvusEtcdCpu = 0.5
+$milvusMinioCpu = 0.5
+$milvusEtcdMemoryBytes = 512MB
+$milvusMinioMemoryBytes = 1GB
+$milvusCpuLimit = $DatabaseCpuLimit - $milvusEtcdCpu - $milvusMinioCpu
+$milvusMemoryLimitBytes = $DatabaseMemoryLimitBytes - $milvusEtcdMemoryBytes - $milvusMinioMemoryBytes
+if ($milvusCpuLimit -le 0 -or $milvusMemoryLimitBytes -le 0) {
+    throw 'The database budget is too small for the Milvus supporting services.'
+}
+
+$invariantCulture = [System.Globalization.CultureInfo]::InvariantCulture
+$env:VECTOR_CPU_LIMIT = $DatabaseCpuLimit.ToString($invariantCulture)
+$env:VECTOR_MEMORY_LIMIT = $DatabaseMemoryLimitBytes.ToString($invariantCulture)
+$env:MILVUS_CPU_LIMIT = $milvusCpuLimit.ToString($invariantCulture)
+$env:MILVUS_MEMORY_LIMIT = $milvusMemoryLimitBytes.ToString($invariantCulture)
+$env:MILVUS_ETCD_CPU_LIMIT = $milvusEtcdCpu.ToString($invariantCulture)
+$env:MILVUS_ETCD_MEMORY_LIMIT = $milvusEtcdMemoryBytes.ToString($invariantCulture)
+$env:MILVUS_MINIO_CPU_LIMIT = $milvusMinioCpu.ToString($invariantCulture)
+$env:MILVUS_MINIO_MEMORY_LIMIT = $milvusMinioMemoryBytes.ToString($invariantCulture)
+
 $jar = Join-Path $projectRoot 'build/libs/VectorDBTest-0.0.1-SNAPSHOT.jar'
-$requestPath = Join-Path $projectRoot 'data/benchmark-request.json'
+$requestPath = if ([IO.Path]::IsPathRooted($RequestFile)) { $RequestFile } else { Join-Path $projectRoot $RequestFile }
 $documentVectors = Join-Path $projectRoot 'data/embeddings/document-vectors.jsonl'
 $queryVectors = Join-Path $projectRoot 'data/embeddings/query-vectors.jsonl'
 $queryDefinitions = Join-Path $projectRoot 'data/queries/queries.jsonl'
@@ -65,6 +92,32 @@ function Start-Database {
     if ($LASTEXITCODE -ne 0) { throw "Cannot start Docker services for $Profile" }
 }
 
+function Assert-DatabaseResourceBudget {
+    param([string]$Profile)
+    $containers = switch ($Profile) {
+        'pgvector' { @('vector-postgres') }
+        'qdrant' { @('vector-qdrant') }
+        'weaviate' { @('vector-weaviate') }
+        'milvus' { @('vector-milvus', 'vector-milvus-etcd', 'vector-milvus-minio') }
+        'opensearch' { @('vector-opensearch') }
+    }
+
+    $inspectJson = docker inspect $containers
+    if ($LASTEXITCODE -ne 0) { throw "Cannot inspect resource limits for $Profile" }
+    $inspected = @(($inspectJson | Out-String) | ConvertFrom-Json)
+    $actualNanoCpus = [long](($inspected | ForEach-Object { [long]$_.HostConfig.NanoCpus } | Measure-Object -Sum).Sum)
+    $actualMemoryBytes = [long](($inspected | ForEach-Object { [long]$_.HostConfig.Memory } | Measure-Object -Sum).Sum)
+    $actualMemorySwapBytes = [long](($inspected | ForEach-Object { [long]$_.HostConfig.MemorySwap } | Measure-Object -Sum).Sum)
+    $expectedNanoCpus = [long][Math]::Round($DatabaseCpuLimit * 1000000000)
+
+    if ($actualNanoCpus -ne $expectedNanoCpus -or
+            $actualMemoryBytes -ne $DatabaseMemoryLimitBytes -or
+            $actualMemorySwapBytes -ne $DatabaseMemoryLimitBytes) {
+        throw "Resource budget mismatch for $Profile`: expected cpuNano=$expectedNanoCpus,memoryBytes=$DatabaseMemoryLimitBytes,memorySwapBytes=$DatabaseMemoryLimitBytes; actual cpuNano=$actualNanoCpus,memoryBytes=$actualMemoryBytes,memorySwapBytes=$actualMemorySwapBytes"
+    }
+    Write-Host "Resource budget verified: $Profile = $DatabaseCpuLimit vCPU / $DatabaseMemoryLimitBytes bytes / no swap"
+}
+
 function Stop-Database {
     param([string]$Profile)
     switch ($Profile) {
@@ -81,6 +134,7 @@ try {
         $application = $null
         try {
             Start-Database $profile
+            Assert-DatabaseResourceBudget $profile
             $stdout = Join-Path $logDirectory "$profile-application.log"
             $stderr = Join-Path $logDirectory "$profile-application-error.log"
             $arguments = @(
@@ -91,7 +145,9 @@ try {
                 "--benchmark.document-vectors=$documentVectors",
                 "--benchmark.query-definitions=$queryDefinitions",
                 "--benchmark.query-vectors=$queryVectors",
-                "--benchmark.result-directory=$resolvedResultDirectory"
+                "--benchmark.result-directory=$resolvedResultDirectory",
+                "--benchmark.resource-budget-cpu=$DatabaseCpuLimit",
+                "--benchmark.resource-budget-memory-bytes=$DatabaseMemoryLimitBytes"
             )
             $application = Start-Process -FilePath 'java' -ArgumentList $arguments -PassThru -WindowStyle Hidden `
                 -RedirectStandardOutput $stdout -RedirectStandardError $stderr
@@ -102,7 +158,8 @@ try {
                 -ContentType 'application/json' -Body $body -TimeoutSec 3600
             $response | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath `
                 (Join-Path $resolvedResultDirectory "api-response-$profile.json") -Encoding utf8
-            $response.results | Select-Object database, targetRecall, actualRecall, p95LatencyMs, qps,
+            $response.results | Select-Object database, targetRecall, actualRecall, recallTolerance, targetMet,
+                recallSelection, tuningRecall, p95LatencyMs, qps,
                 averageCpuPercent, peakMemoryBytes, indexSizeBytes, searchParameters | Format-Table -AutoSize
         } finally {
             if ($application -and -not $application.HasExited) {

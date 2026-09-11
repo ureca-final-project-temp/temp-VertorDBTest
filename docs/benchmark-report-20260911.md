@@ -6,53 +6,59 @@
 - 모델: Ollama `bge-m3:latest`
 - 모델 digest: `7907646426070047a77226ac3e684fbbe8410524f7b4a74d02837e43f2146bab`
 - 거리 함수: cosine, Top-K: 10
+- 주요 Target Recall@10: 0.80 / 0.90 / 0.95, 허용오차 ±0.01
 - 부하: concurrency 10, warm-up 1회, 측정 5회(각 DB·목표별 1,500 search)
 - 인덱스: 모든 DB HNSW
 - Ground Truth: 동일 필터를 적용한 Java brute-force exact top-10
-- 원시 결과: `benchmark-result/production-final`
+- Vector DB 배포 예산: 각 대상 합계 4 vCPU / 8 GiB
+- 원시 결과: `benchmark-result/production-main-recall-final`
+
+단일 컨테이너 DB에는 예산 전부를 적용했다. Milvus는 본체 3 vCPU/6656 MiB, etcd 0.5 vCPU/512 MiB, MinIO 0.5 vCPU/1 GiB로 나눠 합계를 동일하게 맞췄다. 모든 컨테이너는 메모리와 swap 합계 상한을 같은 값으로 설정해 swap을 사용할 수 없다. 실행기는 측정 전에 `docker inspect`의 실제 CPU·메모리·swap 합계를 검증하며 다르면 즉시 중단한다. 전용 Vector DB 프로필에서도 기동되는 PostgreSQL은 공통 원본 저장소이고 검색 요청 경로와 리소스 측정 대상에서는 제외했다.
 
 문서 벡터 SHA-256은 `cc23f095b88585453940e8fca998f8b16f9573361b0c83f021d7bb095ba9e4c6`, 질의 벡터 SHA-256은 `d06cc81c1169e1a926fc69a835fabda560932d8834bd687893fe0da301c4cfa9`다.
 
 ## 검색 결과
 
-| DB | 목표 Recall | 실제 Recall | 목표 달성 | 검색 파라미터 | p95 ms | p99 ms | QPS | 평균 CPU % | Peak RAM MiB |
-|---|---:|---:|:---:|---:|---:|---:|---:|---:|---:|
-| pgvector | 0.90 | 0.9127 | O | ef_search=120 | 9.56 | 15.19 | 1,936.13 | 0.03* | 167.3 |
-| pgvector | 0.95 | 0.9560 | O | ef_search=800 | 52.85 | 57.01 | 727.71 | 131.66 | 170.1 |
-| pgvector | 0.99 | 0.9560 | X | ef_search=1000 | 58.29 | 63.94 | 541.25 | 135.34 | 171.4 |
-| Qdrant | 0.90 | 0.9380 | O | hnsw_ef=400 | 134.22 | 296.64 | 337.33 | 194.48 | 95.4 |
-| Qdrant | 0.95 | 0.9500 | O | hnsw_ef=800 | 145.31 | 393.79 | 283.16 | 182.46 | 96.0 |
-| Qdrant | 0.99 | 0.9633 | X | hnsw_ef=1000 | 204.74 | 394.27 | 234.84 | 194.90 | 96.6 |
-| Weaviate | 0.90 | 0.9147 | O | ef=400 | 40.18 | 57.72 | 484.51 | 115.15 | 445.4 |
-| Weaviate | 0.95 | 0.9560 | O | ef=800 | 38.60 | 52.08 | 492.99 | 110.85 | 430.0 |
-| Weaviate | 0.99 | 0.9653 | X | ef=1000 | 38.30 | 49.14 | 473.19 | 122.16 | 197.0 |
-| Milvus | 0.90 | 0.9620 | O | ef=10 | 27.11 | 34.46 | 992.75 | 83.03 | 921.9 |
-| Milvus | 0.95 | 0.9583 | O | ef=80 | 22.45 | 28.93 | 1,309.13 | 37.34 | 802.9 |
-| Milvus | 0.99 | 0.9823 | X | ef=1000 | 40.24 | 44.56 | 765.48 | 136.31 | 588.9 |
-| OpenSearch | 0.90 | 0.9203 | O | ef_search=10 | 34.22 | 42.32 | 798.88 | 124.94 | 5,107.7 |
-| OpenSearch | 0.95 | 0.9520 | O | ef_search=120 | 41.26 | 47.85 | 806.77 | 126.75 | 5,119.0 |
-| OpenSearch | 0.99 | 0.9983 | O | ef_search=800 | 80.00 | 83.97 | 275.58 | 199.32 | 5,131.3 |
+| DB | 목표 | 실제 | 범위 충족 | 선택 방식 | 검색 파라미터 | p95 ms | p99 ms | QPS | CPU % | RAM MiB |
+|---|---:|---:|:---:|---|---:|---:|---:|---:|---:|---:|
+| pgvector | 0.80 | 0.8240 | X | CLOSEST_AVAILABLE | ef_search=80 | 5.56 | 7.16 | 2,914.68 | 0.01* | 164.1 |
+| pgvector | 0.90 | 0.9137 | X | CLOSEST_AVAILABLE | ef_search=200 | 9.79 | 25.65 | 1,979.86 | 0.02* | 164.2 |
+| pgvector | 0.95 | 0.9450 | O | WITHIN_TOLERANCE | ef_search=400 | 34.07 | 39.77 | 1,333.85 | 42.25 | 165.8 |
+| Qdrant | 0.80 | 0.7943 | O | WITHIN_TOLERANCE | hnsw_ef=80 | 130.74 | 182.82 | 630.88 | 131.64 | 97.4 |
+| Qdrant | 0.90 | 0.9170 | X | CLOSEST_AVAILABLE | hnsw_ef=400 | 104.25 | 195.06 | 539.49 | 131.91 | 98.6 |
+| Qdrant | 0.95 | 0.9417 | O | WITHIN_TOLERANCE | hnsw_ef=1000 | 126.64 | 284.93 | 420.01 | 213.31 | 97.1 |
+| Weaviate | 0.80 | 0.8067 | O | WITHIN_TOLERANCE | ef=40 | 29.73 | 38.83 | 696.84 | 191.66 | 422.9 |
+| Weaviate | 0.90 | 0.9143 | X | CLOSEST_AVAILABLE | ef=200 | 29.86 | 39.25 | 655.65 | 148.09 | 426.1 |
+| Weaviate | 0.95 | 0.9553 | O | WITHIN_TOLERANCE | ef=400 | 27.88 | 34.29 | 653.62 | 128.32 | 235.4 |
+| Milvus | 0.80 | 0.9030 | X | CLOSEST_AVAILABLE | ef=40 | 28.34 | 34.90 | 1,385.07 | 39.09 | 563.2 |
+| Milvus | 0.90 | 0.9030 | O | CLOSEST_AVAILABLE** | ef=40 | 23.11 | 39.67 | 1,346.61 | 35.38 | 547.3 |
+| Milvus | 0.95 | 0.9583 | O | WITHIN_TOLERANCE | ef=80 | 26.88 | 37.32 | 1,267.64 | 64.08 | 543.6 |
+| OpenSearch | 0.80 | 0.9303 | X | CLOSEST_AVAILABLE | ef_search=10 | 6.97 | 30.85 | 2,041.59 | 0.55* | 4,835.3 |
+| OpenSearch | 0.90 | 0.9303 | X | CLOSEST_AVAILABLE | ef_search=10 | 5.85 | 8.22 | 2,510.14 | 0.67* | 4,835.3 |
+| OpenSearch | 0.95 | 0.9413 | O | WITHIN_TOLERANCE | ef_search=20 | 6.41 | 16.06 | 2,333.45 | 0.70* | 4,835.3 |
 
-`*` pgvector 0.90 구간은 검색이 Docker 샘플링 주기보다 빨리 끝나 CPU 값이 유효하지 않다. 시작 전 idle 샘플이 평균에 들어가던 문제는 이후 수정했으며, 원시 결과는 재현성을 위해 변경하지 않았다. 수정 후 별도 재실행(`benchmark-result/resource-sampler-verification`)에서는 Recall 0.9290, p95 17.99 ms, QPS 1,444.59, CPU 29.38%(`ef_search=200`)가 기록돼 실행 간 편차도 확인됐다.
+`CLOSEST_AVAILABLE`은 후보 `[10,20,40,80,120,200,400,800,1000]` 중 튜닝 5회 평균 Recall이 목표 범위에 없어서 가장 가까운 값을 선택했다는 의미다. 실제 Recall은 별도의 본 측정 5회 평균이다.
+
+`*` 전체 검색 측정이 Docker CPU의 약 1초 집계창보다 짧은 행은 CPU 평균이 과소 집계될 수 있어 CPU 효율 비교에서 제외한다. `**` Milvus 0.90은 튜닝 Recall 0.9130으로 범위를 벗어나 closest로 선택됐지만 별도 본 측정은 0.9030으로 범위에 들어왔다.
 
 ## 적재 및 검색 준비 시간
 
 | DB | Time-to-ready ms | Upsert ms | 보고된 index size MiB |
 |---|---:|---:|---:|
-| pgvector | 11,721 | 11,687 | 47.1 |
-| Qdrant | 5,439 | 3,897 | 미지원 |
-| Weaviate | 9,601 | 9,348 | 미지원 |
-| Milvus | 8,000 | 4,498 | 미지원 |
-| OpenSearch | 42,382 | 42,023 | 41.2 |
+| pgvector | 12,642 | 12,595 | 47.1 |
+| Qdrant | 5,143 | 3,891 | 미지원 |
+| Weaviate | 8,886 | 8,625 | 미지원 |
+| Milvus | 8,903 | 4,130 | 미지원 |
+| OpenSearch | 42,320 | 41,933 | 41.2 |
 
 `Time-to-ready`는 drop/create부터 적재 및 비동기 인덱싱 완료까지의 전체 시간이다. 각 제품의 순수 index build API가 같지 않으므로 이 값은 운영 관점의 준비 시간으로만 비교한다.
 
 ## 판정
 
-1. Recall 0.90 조건에서는 pgvector가 가장 낮은 p95와 가장 높은 QPS를 기록했다. 다만 해당 행의 CPU는 재측정 대상이다.
-2. Recall 0.95 조건에서는 Milvus가 p95 22.45 ms, QPS 1,309.13으로 가장 빨랐다. pgvector는 메모리 사용량이 작고 PostgreSQL 단일 운영이라는 이점이 있지만 p95는 52.85 ms였다.
-3. Recall 0.99 조건을 실제로 충족한 제품은 이번 설정에서 OpenSearch뿐이다. 나머지 DB의 0.99 행은 목표 미달이므로 OpenSearch의 같은 Recall 행과 성능 우열을 직접 비교하면 안 된다.
-4. OpenSearch는 목표 0.99를 달성했지만 검색 시 약 5.1 GiB의 컨테이너 메모리를 사용했다. 별도 벡터 DB 도입 판단에는 이 운영 비용을 포함해야 한다.
-5. 이 결과는 단일 로컬 실행이다. 최종 선정 전에는 CPU 측정 보정 후 최소 3회 반복, 실행 순서 교차, cold/warm cache 분리, 실제 운영 필터 선택도와 데이터 크기에서 재검증해야 한다.
+1. Recall 0.80 범위를 실제로 충족한 Qdrant와 Weaviate만 직접 비교할 수 있다. 이 중 Weaviate가 p95 29.73 ms로 Qdrant 130.74 ms보다 낮았다.
+2. Recall 0.90 범위를 본 측정에서 충족한 것은 Milvus뿐이다. 나머지는 closest 결과이며 같은 Recall 성능 비교에 섞으면 안 된다.
+3. Recall 0.95는 다섯 DB 모두 허용 범위를 충족했다. OpenSearch가 p95 6.41 ms와 QPS 2,333.45로 가장 빨랐지만 약 4.7 GiB RAM을 사용했다. pgvector는 p95 34.07 ms, QPS 1,333.85, RAM 165.8 MiB였다.
+4. 자동 튜닝이 후보 전체에 warm-up과 5회 반복을 수행한 뒤 본 측정을 실행하므로 이 결과는 warm-cache 조건이다. cold-cache 결과와 직접 섞지 않는다.
+5. 이 결과는 리소스를 통제한 단일 인덱스 빌드다. 최종 선정 전에는 최소 3회 재구축 반복, 실행 순서 교차, 실제 운영 필터 선택도와 데이터 크기에서 재검증해야 한다.
 
-현재 데이터와 0.95 수준의 목표라면 첫 후보는 PostgreSQL 단일 운영을 유지할 수 있는 pgvector와 처리량이 가장 높았던 Milvus다. 0.99가 하드 요구사항이면 현재 인덱스 설정에서는 OpenSearch만 통과했으며, 다른 DB는 HNSW 생성 파라미터와 필터 전략을 바꾼 별도 실험이 필요하다.
+0.70과 0.99는 주 비교표에서 제외했다. 필요하면 `data/benchmark-request-auxiliary.json`으로 별도 result directory에 실행한다.

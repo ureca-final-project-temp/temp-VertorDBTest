@@ -17,6 +17,9 @@ public class BenchmarkProperties {
     private List<String> containerNames = new ArrayList<>();
     private int upsertBatchSize = 256;
     private List<Integer> autoTuneCandidates = new ArrayList<>(List.of(10, 20, 40, 80, 120, 200, 400, 800, 1000));
+    private double targetRecallTolerance = 0.01;
+    private double resourceBudgetCpu = 4.0;
+    private long resourceBudgetMemoryBytes = 8L * 1024 * 1024 * 1024;
 
     public Path getDocumentVectors() { return documentVectors; }
     public void setDocumentVectors(Path documentVectors) { this.documentVectors = documentVectors; }
@@ -36,4 +39,14 @@ public class BenchmarkProperties {
     public void setUpsertBatchSize(int upsertBatchSize) { this.upsertBatchSize = upsertBatchSize; }
     public List<Integer> getAutoTuneCandidates() { return autoTuneCandidates; }
     public void setAutoTuneCandidates(List<Integer> autoTuneCandidates) { this.autoTuneCandidates = autoTuneCandidates; }
+    public double getTargetRecallTolerance() { return targetRecallTolerance; }
+    public void setTargetRecallTolerance(double targetRecallTolerance) {
+        this.targetRecallTolerance = targetRecallTolerance;
+    }
+    public double getResourceBudgetCpu() { return resourceBudgetCpu; }
+    public void setResourceBudgetCpu(double resourceBudgetCpu) { this.resourceBudgetCpu = resourceBudgetCpu; }
+    public long getResourceBudgetMemoryBytes() { return resourceBudgetMemoryBytes; }
+    public void setResourceBudgetMemoryBytes(long resourceBudgetMemoryBytes) {
+        this.resourceBudgetMemoryBytes = resourceBudgetMemoryBytes;
+    }
 }

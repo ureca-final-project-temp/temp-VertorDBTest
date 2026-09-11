@@ -25,6 +25,9 @@ benchmark:
   container-names: []
   upsert-batch-size: ${UPSERT_BATCH_SIZE:256}
   auto-tune-candidates: [10, 20, 40, 80, 120, 200, 400, 800, 1000]
+  target-recall-tolerance: ${TARGET_RECALL_TOLERANCE:0.01}
+  resource-budget-cpu: ${BENCHMARK_RESOURCE_CPU_BUDGET:4.0}
+  resource-budget-memory-bytes: ${BENCHMARK_RESOURCE_MEMORY_BUDGET_BYTES:8589934592}
 
 management:
   endpoints:

@@ -17,7 +17,7 @@ import java.util.Map;
 import java.util.Locale;
 
 public class ResultWriter {
-    private static final String CSV_HEADER = "database,index,target_recall,actual_recall,average_ms,p50_ms,p95_ms,p99_ms,qps,cpu_percent,peak_memory_bytes,disk_write_bytes,index_size_bytes,time_to_index_ready_ms,upsert_ms,vector_count,query_executions,concurrency,top_k,warmup_iterations,measurement_iterations,index_parameters,search_parameters,environment,measured_at\n";
+    private static final String CSV_HEADER = "database,index,target_recall,actual_recall,recall_tolerance,target_met,recall_selection,tuning_recall,average_ms,p50_ms,p95_ms,p99_ms,qps,cpu_percent,peak_memory_bytes,disk_write_bytes,index_size_bytes,time_to_index_ready_ms,upsert_ms,vector_count,query_executions,concurrency,top_k,warmup_iterations,measurement_iterations,index_parameters,search_parameters,environment,measured_at\n";
     private final ObjectMapper objectMapper;
 
     public ResultWriter(ObjectMapper objectMapper) {
@@ -100,8 +100,9 @@ public class ResultWriter {
 
     private String toCsv(BenchmarkResult result) {
         return String.format(Locale.ROOT,
-                "%s,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.3f,%.3f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%s,%s,%s%n",
+                "%s,%s,%.6f,%.6f,%.6f,%s,%s,%s,%.6f,%.6f,%.6f,%.6f,%.3f,%.3f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%s,%s,%s%n",
                 csv(result.database()), csv(result.indexType()), result.targetRecall(), result.actualRecall(),
+                result.recallTolerance(), result.targetMet(), csv(result.recallSelection()), csvNumber(result.tuningRecall()),
                 result.averageLatencyMs(), result.p50LatencyMs(), result.p95LatencyMs(), result.p99LatencyMs(), result.qps(),
                 result.averageCpuPercent(), result.peakMemoryBytes(), result.diskWriteBytes(), result.indexSizeBytes(),
                 result.indexBuildTimeMs(), result.upsertTimeMs(), result.vectorCount(), result.queryExecutions(),
@@ -109,6 +110,10 @@ public class ResultWriter {
                 csv(objectMapper.writeValueAsString(result.indexParameters())),
                 csv(objectMapper.writeValueAsString(result.searchParameters())),
                 csv(objectMapper.writeValueAsString(result.environment())), result.measuredAt());
+    }
+
+    private String csvNumber(Double value) {
+        return value == null ? "" : String.format(Locale.ROOT, "%.6f", value);
     }
 
     private String csv(String value) {

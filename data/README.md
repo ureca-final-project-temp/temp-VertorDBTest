@@ -45,7 +45,9 @@ DB benchmark에서는 embedding 생성 시간을 latency에 포함하지 않는�
 
 `ANN Recall@10 = |Exact Top-10 ∩ ANN Top-10| / 10`
 
-DB 간 주 비교는 Recall@10 약 0.90 / 0.95 / 0.99에서 p95 latency, QPS, RAM 등을 비교한다.
+DB 간 주 비교 Target Recall@10은 0.80 / 0.90 / 0.95이며 허용 범위는 각 목표의 ±0.01이다.
+해당 범위에 드는 검색 설정이 없으면 후보 중 목표에 가장 가까운 실제 Recall을 사용하고
+`CLOSEST_AVAILABLE`로 표시한다. 0.70 / 0.99는 필요할 때만 보조 실험으로 측정한다.
 
 ### 2. 의미 검색 품질 확인 (선택)
 `qrels.tsv`를 사용해 실제 target topic 문서가 검색됐는지 별도로 평가할 수 있다.
