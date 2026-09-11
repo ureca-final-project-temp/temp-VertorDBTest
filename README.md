@@ -44,6 +44,9 @@ ANN Recall@10을 기준으로 검색 품질을 맞춘 뒤
 상세 결과와 해석은 [docs/07-results/benchmark-results-rerun.md](docs/07-results/benchmark-results-rerun.md),
 1차 실행이 무효가 된 경위는 [docs/07-results/analysis.md](docs/07-results/analysis.md)에 있습니다.
 
+<img width="986" height="512" alt="image" src="https://github.com/user-attachments/assets/7182ad53-7801-4338-aaa5-d9237652068a" />
+
+
 ## 실험 한눈에 보기
 
 ```text
