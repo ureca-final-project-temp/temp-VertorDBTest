@@ -1,0 +1,35 @@
+{
+  "rebuildAndLoad": true,
+  "scenarios": [
+    {
+      "database": "",
+      "indexType": "hnsw",
+      "targetRecall": 0.90,
+      "topK": 10,
+      "concurrency": 10,
+      "warmupIterations": 1,
+      "measurementIterations": 5,
+      "searchParameters": {}
+    },
+    {
+      "database": "",
+      "indexType": "hnsw",
+      "targetRecall": 0.95,
+      "topK": 10,
+      "concurrency": 10,
+      "warmupIterations": 1,
+      "measurementIterations": 5,
+      "searchParameters": {}
+    },
+    {
+      "database": "",
+      "indexType": "hnsw",
+      "targetRecall": 0.99,
+      "topK": 10,
+      "concurrency": 10,
+      "warmupIterations": 1,
+      "measurementIterations": 5,
+      "searchParameters": {}
+    }
+  ]
+}

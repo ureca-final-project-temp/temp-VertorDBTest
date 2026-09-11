@@ -1,0 +1,43 @@
+{
+  "dataset_name": "bge-m3-vector-db-benchmark-ko",
+  "version": "1.0",
+  "created_for": "Vector DB comparison benchmark",
+  "model": {
+    "name": "BAAI/bge-m3",
+    "dense_dimension": 1024,
+    "max_sequence_length": 8192,
+    "benchmark_mode": "dense_embedding_only",
+    "query_instruction": "none"
+  },
+  "corpus": {
+    "records": 10000,
+    "languages": {
+      "ko": 10000
+    },
+    "synthetic": true,
+    "topic_count": 200
+  },
+  "queries": {
+    "records": 300,
+    "distribution": {
+      "metadata_filter": 30,
+      "short_clear": 60,
+      "long_natural": 60,
+      "technical_term": 45,
+      "exact_identifier": 30,
+      "ambiguous": 30,
+      "semantic_paraphrase": 45
+    },
+    "english_or_mixed_queries": 21
+  },
+  "recommended_benchmark": {
+    "top_k": 10,
+    "distance_metric": "cosine (or the exact metric/normalization chosen for your BGE-M3 pipeline; keep identical across DBs)",
+    "ann_recall_targets": [
+      0.9,
+      0.95,
+      0.99
+    ],
+    "note": "Generate document/query embeddings once and reuse the exact same float vectors in every Vector DB."
+  }
+}

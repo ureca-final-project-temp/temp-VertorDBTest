@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: VectorDBTest
+  datasource:
+    url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/vectorlab}
+    username: ${POSTGRES_USER:vector}
+    password: ${POSTGRES_PASSWORD:vector}
+  data:
+    jdbc:
+      repositories:
+        enabled: false
+  flyway:
+    enabled: false
+
+vector:
+  store:
+    type: none
+
+benchmark:
+  document-vectors: ${DOCUMENT_VECTORS:data/embeddings/document-vectors.jsonl}
+  query-definitions: ${QUERY_DEFINITIONS:data/queries/queries.jsonl}
+  query-vectors: ${QUERY_VECTORS:data/embeddings/query-vectors.jsonl}
+  result-directory: ${BENCHMARK_RESULT_DIR:benchmark-result}
+  metric: ${VECTOR_METRIC:COSINE}
+  container-names: []
+  upsert-batch-size: ${UPSERT_BATCH_SIZE:256}
+  auto-tune-candidates: [10, 20, 40, 80, 120, 200, 400, 800, 1000]
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
