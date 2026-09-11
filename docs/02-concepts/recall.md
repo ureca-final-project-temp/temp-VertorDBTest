@@ -43,21 +43,20 @@ embedding과 chunking 품질의 영향을 함께 받습니다.
 
 | 목표 | 성격 |
 |---|---|
-| 0.80 | 속도 우선. 품질 손실을 감수하는 구간 |
 | 0.90 | 실무에서 자주 쓰는 균형점 |
 | 0.95 | 품질 우선. 대부분 정답을 회수 |
 
 허용오차는 각 목표의 **±0.01**입니다.
 
-주 비교는 필터가 없는 270개 질의의 Recall을 사용합니다. 결과의 `comparison_recall`이
-그 값이며, 필터를 포함한 300개 전체의 `actual_recall`은 서비스 혼합 참고값입니다.
+주 비교는 evaluation 200개 중 필터가 없는 질의의 Recall을 사용합니다. 결과의
+`comparison_recall`이 그 값이며, evaluation 필터를 포함한 `actual_recall`은 혼합 참고값입니다.
 
 보조 목표 0.70과 0.99는 주 비교표에 섞지 않고 필요할 때 별도로 실행합니다
 (`data/benchmark-request-auxiliary.json`).
 
 ## 선택 방식 표기
 
-결과의 `recall_selection` 컬럼이 그 행을 어떻게 얻었는지 알려줍니다.
+결과의 `calibration_selection` 컬럼이 calibration에서 그 설정을 어떻게 얻었는지 알려줍니다.
 
 | 값 | 의미 | 비교에 사용 |
 |---|---|---|
@@ -67,7 +66,7 @@ embedding과 chunking 품질의 영향을 함께 받습니다.
 
 `CLOSEST_AVAILABLE` 행끼리, 또는 그 행과 `WITHIN_TOLERANCE` 행을 나란히 두고
 "어느 DB가 빠르다"고 말하면 안 됩니다. 서로 다른 Recall의 속도를 비교하는 것이기 때문입니다.
-튜닝 후 본 측정 값이 달라질 수도 있으므로 `recall_selection`뿐 아니라 `target_met`도
+calibration과 evaluation 값이 달라질 수 있으므로 `calibration_selection`뿐 아니라 `target_met`도
 반드시 확인합니다.
 
 ## 목표를 못 맞추는 경우

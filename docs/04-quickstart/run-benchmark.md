@@ -1,125 +1,76 @@
-# Run Benchmark
+# 벤치마크 실행
 
-## 완료 기준
-
-다섯 DB의 측정 결과가 하나의 CSV에 모이고, 각 행의 `recall_selection`과
-`target_met`을 함께 확인해 그 행을 비교에 쓸 수 있는지 판단할 수 있습니다.
-
-## 사전 요구사항
-
-[local-setup.md](local-setup.md)를 완료하세요. 특히 다음이 필요합니다.
-
-- `build/libs/VectorDBTest-0.0.1-SNAPSHOT.jar`
-- `data/embeddings/document-vectors.jsonl`
-- `data/embeddings/query-vectors.jsonl`
-- `data/queries/queries.jsonl`
-
-## 전체 실행
+## 기본 28-case 실행
 
 ```powershell
+.\gradlew.bat test
 .\gradlew.bat bootJar
-.\scripts\run-all-benchmarks.ps1 -ResultDirectory benchmark-result/run-01
+.\scripts\run-all-benchmarks.ps1 `
+  -Repetitions 3 `
+  -ResultDirectory benchmark-result/matrix-primary
 ```
 
-스크립트가 DB마다 수행하는 일:
+`Repetitions`는 3~5만 허용합니다. 스크립트가 DB별 실행 순서를 교차하고 각 회차마다 전체 인덱스 수명주기를 다시 수행합니다. 마지막에는 벤치마크 DB 컨테이너를 중지하며 Ollama는 중지하지 않습니다.
 
-```text
-1. docker compose up   해당 DB + postgres
-2. HTTP readiness 대기
-3. docker inspect로 CPU·메모리·swap 합계 검증   ← 불일치 시 즉시 중단
-4. jar 기동, /actuator/health 대기
-5. POST /api/benchmarks/run
-6. 결과 요약 출력
-7. 앱 종료, DB 컨테이너 stop
-```
-
-### 확인
-
-```powershell
-Import-Csv benchmark-result/run-01/csv/vector-db-result.csv |
-  Select-Object database, target_recall, comparison_recall, target_met, recall_selection,
-                unfiltered_p95_ms, filtered_p95_ms, qps | Format-Table -AutoSize
-```
-
-15행(5 DB × 3 목표)이 나오면 성공입니다.
-
-## 일부 DB만 실행
-
-```powershell
-.\scripts\run-all-benchmarks.ps1 -Profiles pgvector,qdrant
-```
-
-## 보조 실험 (0.70 / 0.99)
-
-주 비교표에 섞지 않고 별도 디렉터리에 실행합니다.
+일부 case만 실행하려면 ID를 고릅니다.
 
 ```powershell
 .\scripts\run-all-benchmarks.ps1 `
-  -RequestFile data/benchmark-request-auxiliary.json `
-  -ResultDirectory benchmark-result/auxiliary
+  -TestIds T03,T04,T09,T10 `
+  -Repetitions 3 `
+  -ResultDirectory benchmark-result/smoke
 ```
 
-## 자원 예산 변경
+## 결과 확인
 
 ```powershell
-.\scripts\run-all-benchmarks.ps1 `
-  -DatabaseCpuLimit 4.0 `
-  -DatabaseMemoryLimitBytes 8589934592
+Import-Csv benchmark-result/matrix-primary/summary/vector-db-summary.csv |
+  Select-Object test_id,database,engine,index,target_recall,completed_runs,
+    recall_average,recall_min,recall_max,median_p95_ms,median_qps,
+    median_ram_max_bytes,stability_verified,eligible |
+  Format-Table -AutoSize
 ```
 
-Milvus 보조 서비스 몫을 제외한 나머지가 자동으로 본체에 할당됩니다.
+원시 행은 `csv/vector-db-result.csv`, 실행별 JSON은 `raw/`, 애플리케이션 로그는 `logs/`, 교차 순서는 `execution-order.json`에 있습니다.
 
-## 수동 실행 (DB 하나)
+## 필터 선택도
 
 ```powershell
-docker compose --profile qdrant up -d postgres qdrant
-
-$env:BENCHMARK_RESULT_DIR = "benchmark-result/manual-qdrant"
-.\gradlew.bat bootRun --args="--spring.profiles.active=qdrant --vector.qdrant.dimension=1024"
+.\scripts\run-filter-selectivity-benchmarks.ps1 `
+  -TestIds T02,T06,T08 `
+  -Repetitions 3
 ```
 
-다른 창에서:
+생성기는 임베딩을 바꾸지 않고 문서 ID SHA-256 순서로 중첩 cohort를 만들며, 10k에서는 정확히 100/1,000/5,000개 문서를 남깁니다. 세 결과 디렉터리의 `filtered_*`를 비교합니다.
+
+## 100k/1M shortlist
 
 ```powershell
-Invoke-RestMethod -Method Post `
-  -Uri http://localhost:8080/api/benchmarks/run `
-  -ContentType application/json `
-  -Body (Get-Content -Raw data/benchmark-request.json)
+.\scripts\run-shortlist-scale-validation.ps1 `
+  -TestIds T02,T06,T08 `
+  -Scale 100000 `
+  -DocumentVectors D:\dataset\documents-100k.jsonl `
+  -QueryVectors D:\dataset\query-vectors.jsonl `
+  -QueryDefinitions D:\dataset\queries.jsonl
 ```
 
-## 결과 읽기
+요청 Scale보다 벡터가 적으면 즉시 실패합니다. 10k 행을 복제한 파일은 유효한 규모 검증이 아닙니다.
 
-```text
-benchmark-result/run-01/
-├─ raw/ground-truth-top10.jsonl      정답지
-├─ raw/benchmark-<run-id>.json       실행별 전체 결과
-├─ csv/vector-db-result.csv          누적 비교표
-├─ charts/recall-latency-latest.svg  unfiltered Recall vs unfiltered p95
-└─ logs/                             DB별 애플리케이션 로그
+## 실제 프로젝트 데이터
+
+```powershell
+.\scripts\run-real-workload-validation.ps1 `
+  -TestIds T02,T06,T08 `
+  -DocumentVectors D:\project\documents.jsonl `
+  -QueryVectors D:\project\query-vectors.jsonl `
+  -QueryDefinitions D:\project\queries.jsonl
 ```
 
-읽는 순서:
+문서 metadata나 query 정의에 `synthetic:true`가 발견되면 실행을 거부합니다. 실제 query 길이·유형·metadata 분포를 입력 파일에서 보존해야 합니다.
 
-1. `recall_selection=WITHIN_TOLERANCE`이면서 `target_met=true`인 행만 고릅니다.
-2. 같은 `target_recall`끼리 묶습니다.
-3. `unfiltered_p95_ms`로 ANN 성능을, `filtered_p95_ms`로 필터 처리 능력을 비교합니다.
-4. CPU가 1% 미만인 행은 과소 집계이므로 자원 비교에서 제외합니다.
+## 판독 규칙
 
-지표 정의는 [../03-benchmark-design/metrics.md](../03-benchmark-design/metrics.md),
-파일 스키마는 [../06-implementation/result-format.md](../06-implementation/result-format.md)에 있습니다.
-
-## 주의
-
-- **CSV 스키마가 바뀌면 기존 디렉터리에 이어 쓸 수 없습니다.**
-  `ResultWriter`가 헤더 불일치를 감지하고 새 디렉터리를 쓰라는 예외를 던집니다.
-- 한 실행의 `time_to_index_ready_ms`와 `upsert_ms`는 **첫 시나리오에만** 기록됩니다.
-- 비교 실행 중에는 이미지 태그를 바꾸지 않습니다.
-
-## 실패했다면
-
-[../08-troubleshooting/common-issues.md](../08-troubleshooting/common-issues.md)를 봅니다.
-
-## 다음 단계
-
-- 결과 해석 → [../07-results/analysis.md](../07-results/analysis.md)
-- 선정 판단 → [../07-results/decision.md](../07-results/decision.md)
+- `calibration_selection`은 파라미터 선택 결과, `target_met`은 evaluation 판정입니다.
+- 목표 ±0.01과 최종 Recall 하한은 별도입니다.
+- 기본 `eligible`은 Recall 평균 ≥0.95, median p95 ≤30ms, median peak RAM ≤2GiB, 반복 완료, stability 통과를 모두 요구합니다.
+- index size가 `-1`이면 제품 API에서 순수 인덱스 크기를 분리하지 못한 것이며 0 bytes가 아닙니다.

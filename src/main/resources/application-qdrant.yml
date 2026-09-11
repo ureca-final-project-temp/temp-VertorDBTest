@@ -25,5 +25,8 @@ vector:
       access_level: keyword
       language: keyword
       category: keyword
+      benchmark_selectivity_01: keyword
+      benchmark_selectivity_10: keyword
+      benchmark_selectivity_50: keyword
 
 benchmark.container-names: [vector-qdrant]

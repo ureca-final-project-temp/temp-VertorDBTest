@@ -1,6 +1,8 @@
 package com.myapp.infrastructure.vector.milvus;
 
 import com.myapp.infrastructure.vector.http.JsonHttpClient;
+import io.milvus.v2.client.ConnectConfig;
+import io.milvus.v2.client.MilvusClientV2;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -28,6 +30,10 @@ public class MilvusConfig {
 
     @Bean
     MilvusIndexManager milvusIndexManager(JsonHttpClient client, MilvusProperties properties) {
-        return new MilvusIndexManager(client, properties);
+        ConnectConfig connectConfig = ConnectConfig.builder()
+                .uri(properties.getBaseUrl())
+                .token(properties.getToken())
+                .build();
+        return new MilvusIndexManager(client, properties, new MilvusClientV2(connectConfig));
     }
 }

@@ -1,5 +1,8 @@
 # Analysis
 
+> **역사적 결함 분석:** 아래 수치는 새 T01~T28 프로토콜의 최종 결과가 아닙니다.
+> 지적된 query 누수·단일 재구축·QPS 분모·Milvus drift 문제는 현재 코드에서 별도 계약으로 다룹니다.
+
 1차 본실험(2026-09-11) 결과를 검토하고 발견한 측정 결함, 그 근거와 수정 내용입니다.
 결함 수정 후 재실행은 완료했으며 결과는
 [benchmark-results-rerun.md](benchmark-results-rerun.md)에 분리해 기록했습니다.

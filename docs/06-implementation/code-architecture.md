@@ -32,7 +32,7 @@ com.myapp
 │
 ├─ benchmark/               측정 엔진
 ├─ dataset/                 JSONL 로더
-└─ tools/                   EmbeddingDatasetGenerator
+└─ tools/                   EmbeddingDatasetGenerator, FilterSelectivityWorkloadGenerator
 ```
 
 ## 개념 → 코드 위치
@@ -52,7 +52,10 @@ com.myapp
 | 설정값 | `benchmark/BenchmarkProperties.java` |
 | 벡터 JSONL 파싱 | `dataset/VectorDatasetLoader.java`, `dataset/JsonlSupport.java` |
 | 질의 + 필터 로딩 | `dataset/QuerySetLoader.java` |
+| calibration/evaluation 고정 분할 | `benchmark/QueryPartitioner.java` |
+| Milvus drift 진단 모델 | `benchmark/StabilityDiagnostics.java` |
 | 임베딩 생성기 | `tools/EmbeddingDatasetGenerator.java` |
+| 필터 1%/10%/50% 생성기 | `tools/FilterSelectivityWorkloadGenerator.java` |
 
 ## 프로필로 DB를 고르는 방식
 
@@ -97,6 +100,8 @@ if (store == null) throw new IllegalStateException("No vector store is active. E
 | `QuerySegmentTest` | 구간 집계, 빈 구간 |
 | `ResourceCollectorTest` | docker stats 단위 파싱, baseline 처리 |
 | `ResultWriterTest` | CSV 헤더/행 컬럼 수 일치 |
+| `QueryPartitionerTest` | query type 층화, 고정 100/200 분할 |
+| `VectorIndexContractTest` | 28-case adapter engine/index/search 파라미터 계약 |
 | `QdrantIndexManagerTest` | exact-scan 대기 생략 경로에서도 payload index 검증 |
 | `VectorDatasetLoaderTest`, `QuerySetLoaderTest` | JSONL 필드 별칭, 필터 병합 |
 

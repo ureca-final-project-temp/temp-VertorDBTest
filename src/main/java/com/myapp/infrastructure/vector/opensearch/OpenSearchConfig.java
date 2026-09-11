@@ -30,7 +30,7 @@ public class OpenSearchConfig {
     }
 
     @Bean
-    OpenSearchIndexManager openSearchIndexManager(JsonHttpClient client, OpenSearchProperties properties) {
-        return new OpenSearchIndexManager(client, properties);
+    OpenSearchIndexManager openSearchIndexManager(JsonHttpClient client, OpenSearchProperties properties, ObjectMapper objectMapper) {
+        return new OpenSearchIndexManager(client, properties, objectMapper);
     }
 }

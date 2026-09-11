@@ -1,5 +1,8 @@
 # Benchmark Results — 1차 (2026-09-11)
 
+> **역사 자료:** calibration/evaluation 분리, 3~5회 전체 재구축, 순서 교차, 순수 검색 QPS,
+> T01~T28 다중 인덱스 행렬을 적용하기 전 결과입니다. 현재 제품 순위표로 사용하지 않습니다.
+
 > **상태: 무효. 이 실행의 지연 수치는 DB 선정 근거로 쓰지 않는다.**
 > 결함 수정 후 재실행은 완료했으며 결과는
 > [benchmark-results-rerun.md](benchmark-results-rerun.md)에 있다.

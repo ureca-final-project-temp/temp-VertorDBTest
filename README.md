@@ -1,171 +1,123 @@
-# Vector DB Benchmark
+# Vector DB 비교·검증 하네스
 
-Spring Boot 기반 RAG Retrieval 환경에서
-pgvector, Qdrant, Weaviate, Milvus, OpenSearch를 비교합니다.
+동일한 BGE-M3 1024차원 벡터와 cosine metric으로 pgvector, Qdrant, Weaviate, Milvus,
+OpenSearch의 Recall@10·latency·QPS·자원·인덱스 준비 비용을 비교하는 Spring Boot 하네스입니다.
 
-## 결론 요약
+## 현재 판정 상태
 
-본 실험은 동일한 BGE-M3 embedding, 동일 Dataset, 동일 Query Set,
-동일 Top-K 및 동일 Resource 제한 조건에서
-각 Vector DB의 ANN 검색 성능을 비교합니다.
+- 현재 주 비교 행렬은 [data/benchmark-matrix.json](data/benchmark-matrix.json)의 T01~T28입니다.
+- 목표 Recall@10은 0.90과 0.95, 허용 범위는 `목표 ±0.01`입니다. 범위에 드는 후보가 없으면 가장 가까운 실제값과 `CLOSEST_AVAILABLE`을 기록합니다.
+- 300개 query는 SHA-256 기반 고정 층화 분할로 calibration 100 / evaluation 200이 됩니다. 파라미터 선택은 calibration만, 최종 Recall·p95·QPS는 evaluation만 사용합니다.
+- 기본 실행은 인덱스를 포함한 전체 수명주기를 3회 재구축하며 3~5회만 허용합니다. DB 순서는 회차별로 교차합니다.
+- 기존 `docs/07-results`의 단일 HNSW 결과는 결함 발견용 역사 자료입니다. 현재 28-case 행렬의 최종 순위표가 아닙니다.
+- HFresh, pgvector IVFFlat, OpenSearch Faiss IVF/JVector DiskANN, Milvus DISKANN의 3회 수명주기 스모크는 완료했습니다. 전체 T01~T28 공식 실행과 실제 데이터·100k 입력 검증은 별도 결과 디렉터리에서 수행해야 합니다.
 
-Exact Search 결과를 Ground Truth로 사용하고,
-ANN Recall@10을 기준으로 검색 품질을 맞춘 뒤
-다음 지표를 비교합니다.
+## 비교 행렬
 
-- p95 / p99 Latency
-- QPS
-- CPU
-- RAM
-- Time-to-ready (drop/create + 적재 + 준비 완료)
-- 검색 중 Disk write / 제품이 제공하는 index size
+| DB | Engine | Index |
+|---|---|---|
+| pgvector | PostgreSQL | HNSW, IVFFlat |
+| Qdrant | Native | HNSW |
+| Weaviate | Native | HNSW, HFresh |
+| Milvus | Native | HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, DISKANN |
+| OpenSearch | Lucene | HNSW |
+| OpenSearch | Faiss | HNSW, IVF |
+| OpenSearch | JVector | DiskANN |
 
-최종 평가는 단순히 "가장 빠른 DB"를 선정하는 것이 아니라,
+각 조합은 Recall 0.90/0.95 두 행을 가집니다. OpenSearch JVector는 KNN 플러그인과 같은 노드에서 공존하지 않으므로 별도 이미지·컨테이너로 실행합니다.
 
-> 동일한 검색 품질에서 어떤 Vector DB가
-> 더 낮은 지연시간과 적은 자원으로 검색을 수행하는가
+## 공정성 계약
 
-를 기준으로 합니다.
-
-### 재실행 결과 요약
-
-측정 결함을 수정한 뒤 2026-09-11에 1회 재실행했습니다. 아래 표는 목표 0.95 행의
-**무필터 비교 Recall과 무필터 p95**를 사용합니다. Milvus는 튜닝 단계에서는 범위에
-들었지만 본 측정 Recall이 크게 변해 직접 비교에서 제외합니다.
-
-| DB | 비교 Recall@10 | 범위 충족 | 무필터 p95 ms | QPS | RAM MiB | 평가 |
-|---|---:|:---:|---:|---:|---:|---|
-| pgvector | 0.9489 | O | 31.05 | 1,485.78 | 194.6 | 직접 비교 가능 |
-| Qdrant | 0.9522 | O | 5.62 | 2,751.52 | 101.3 | 직접 비교 가능 |
-| Weaviate | 0.9515 | O | 31.29 | 601.10 | 294.3 | 직접 비교 가능 |
-| Milvus | 0.7422 | X | 30.21 | 1,103.26 | 710.9 | 본 측정 drift, 제외 |
-| OpenSearch | 0.9493 | O | 16.75 | 1,696.75 | 5,123.1 | 직접 비교 가능 |
-
-상세 결과와 해석은 [docs/07-results/benchmark-results-rerun.md](docs/07-results/benchmark-results-rerun.md),
-1차 실행이 무효가 된 경위는 [docs/07-results/analysis.md](docs/07-results/analysis.md)에 있습니다.
-
-## 실험 한눈에 보기
-
-```text
-BGE-M3
-  → 1024-dimensional vector
-  → Same Dataset
-  → Same Query Vector
-  → Exact Top-K
-  → ANN Top-K
-  → Recall@10
-  → Latency / QPS / CPU / RAM 비교
-```
-
-## 왜 비교하는가
-
-RAG 서비스에서 Vector DB를 고를 때 흔히 보는 벤치마크는 세 가지 이유로 그대로 쓰기 어렵습니다.
-
-- **검색 품질이 다른 상태의 속도를 비교합니다.** ANN은 탐색 폭을 줄이면 항상 빨라지므로,
-  Recall을 맞추지 않은 latency 비교는 순위를 만들어낼 수 있습니다.
-- **자원 조건이 다릅니다.** CPU와 메모리 상한이 다르면 같은 지표를 나란히 둘 수 없습니다.
-- **embedding 조건이 다릅니다.** 모델과 차원이 다르면 인덱스 난이도 자체가 달라집니다.
-
-이 저장소는 세 가지를 모두 고정합니다.
-
-| 고정 대상 | 방법 |
+| 항목 | 고정값 또는 검증 방식 |
 |---|---|
-| 검색 품질 | Exact Top-K를 Ground Truth로 계산하고, Recall@10이 목표 구간에 들도록 DB별 탐색 파라미터를 자동 조정 |
-| 자원 | 대상 합계 4 vCPU / 8 GiB, swap 금지. 측정 전 `docker inspect`로 실제 상한을 검증하고 다르면 중단 |
-| 입력 | 동일한 BGE-M3 1024차원 벡터 파일을 전 DB에 재사용하고 SHA-256으로 고정 |
-| 원본 | PostgreSQL에 원문 200건·청크 10,000건을 적재하고 입력 SHA-256과 건수를 검증 |
+| 벡터 | 로컬 Ollama `bge-m3`, dense 1024차원 |
+| 거리 | cosine |
+| Top-K | 10 |
+| Query 분할 | calibration 100 / evaluation 200, query type 층화 + SHA-256 |
+| 부하 | concurrency 10, warm-up 1, measurement 5 |
+| 자원 | DB 대상 합계 4 vCPU / 8 GiB / swap 없음 |
+| 반복 | 3~5회, 매회 drop → create → load → index ready → warm-up → measurement |
+| 순서 | 회차별 DB 순서 교차 |
+| QPS | 검색 future가 모두 끝난 시점에 타이머 종료. Recall 후처리 제외 |
+| Ground truth | 같은 입력에 대한 application exact cosine top-K |
 
-측정 구간은 `VectorStore.search()` 호출만 감쌉니다. LLM 및 embedding 생성 시간은 포함하지 않습니다.
+Milvus의 4 vCPU/8 GiB는 Milvus·etcd·MinIO 합계입니다. 실행기는 `docker inspect`로 실제 제한을 확인하고 다르면 측정을 중단합니다. Ollama는 임베딩 생성용이며 벤치마크 종료 시 중단하지 않습니다.
 
-이 벤치마크가 답하지 않는 질문은 [docs/03-benchmark-design/limitations.md](docs/03-benchmark-design/limitations.md)에 있습니다.
+## 실행
 
-## 비교 대상
-
-| DB | 버전 | 인덱스 | 탐색 파라미터 | 접근 방식 |
-|---|---|---|---|---|
-| pgvector | PostgreSQL 17 / pgvector 0.8.6 | HNSW | `ef_search` | JDBC |
-| Qdrant | 1.19.0 | HNSW | `hnsw_ef` | REST query API |
-| Weaviate | 1.39.3 | HNSW | `ef` | GraphQL |
-| Milvus | 3.0.1 | HNSW | `ef` | REST v2 |
-| OpenSearch | 3.8.0 | Lucene HNSW | `ef_search` | REST |
-
-모든 DB가 HNSW를 사용하고 생성 파라미터는 `M=16`, `ef_construction=128`로 같습니다.
-거리 함수는 cosine, Top-K는 10입니다.
-
-제품별 설정과 주의점은 [docs/05-databases/](docs/05-databases/)를 봅니다.
-
-## Quick Start
-
-요구사항: Java 21, Docker 27+, PowerShell, 로컬 Ollama(`bge-m3:latest`)
-
-4차원 샘플 데이터로 연결·적재·검색·결과 저장까지 확인하는 경로입니다.
-Ollama 없이 바로 실행할 수 있습니다.
-
-```powershell
-docker compose --profile qdrant up -d postgres qdrant
-
-$env:VECTOR_DIMENSION = "4"
-$env:DOCUMENT_VECTORS = "data/sample/documents-vectors.jsonl"
-$env:QUERY_DEFINITIONS = "data/sample/queries.jsonl"
-$env:QUERY_VECTORS = "data/sample/query-vectors.jsonl"
-$env:BENCHMARK_RESULT_DIR = "benchmark-result/smoke"
-
-.\gradlew.bat bootRun --args="--spring.profiles.active=qdrant"
-```
-
-다른 PowerShell 창에서 실행합니다.
-
-```powershell
-Invoke-RestMethod -Method Post `
-  -Uri http://localhost:8080/api/benchmarks/run `
-  -ContentType application/json `
-  -Body (Get-Content -Raw data/sample/benchmark-request.json)
-```
-
-### 정상 동작 확인
-
-```powershell
-Test-Path benchmark-result/smoke/csv/vector-db-result.csv
-# expected: True
-```
-
-CSV에 `database=qdrant` 행이 1개 이상 있고 `actual_recall`이 0보다 크면 성공입니다.
-
-> 샘플은 배선 확인용 smoke test입니다. 4차원 20건짜리 인위적 데이터이므로
-> **DB 성능 결론에 사용하면 안 됩니다.**
-
-본실험 실행은 [docs/04-quickstart/run-benchmark.md](docs/04-quickstart/run-benchmark.md)를 봅니다.
-
-## Documentation
-
-| 목적 | 문서 |
-|---|---|
-| 시스템 구조와 측정 경로 | [docs/01-overview/architecture.md](docs/01-overview/architecture.md) |
-| 실험이 무엇이고 무엇이 아닌가 | [docs/01-overview/benchmark-overview.md](docs/01-overview/benchmark-overview.md) |
-| 벡터·임베딩·HNSW·Recall 개념 | [docs/02-concepts/](docs/02-concepts/) |
-| 실험 설계와 통제 변수 | [docs/03-benchmark-design/](docs/03-benchmark-design/) |
-| 지표 정의와 읽는 법 | [docs/03-benchmark-design/metrics.md](docs/03-benchmark-design/metrics.md) |
-| 이 실험의 한계 | [docs/03-benchmark-design/limitations.md](docs/03-benchmark-design/limitations.md) |
-| 로컬 설치와 실행 | [docs/04-quickstart/](docs/04-quickstart/) |
-| DB별 설정과 주의점 | [docs/05-databases/](docs/05-databases/) |
-| 코드 구조와 결과 파일 스키마 | [docs/06-implementation/](docs/06-implementation/) |
-| 측정 결과와 판정 | [docs/07-results/](docs/07-results/) |
-| 자주 겪는 문제 | [docs/08-troubleshooting/common-issues.md](docs/08-troubleshooting/common-issues.md) |
-
-## Status
-
-측정 결함 수정 후 1회 재실행을 완료했습니다. 최종 선정 전 반복 실행은 남아 있습니다.
+요구 사항은 Java 21, Docker Desktop, PowerShell입니다. 임베딩 파일이 이미 있으면 다시 생성하지 않습니다.
 
 ```powershell
 .\gradlew.bat test
 .\gradlew.bat bootJar
-docker compose --profile qdrant --profile weaviate --profile milvus --profile opensearch config --quiet
+.\scripts\run-all-benchmarks.ps1 `
+  -Repetitions 3 `
+  -ResultDirectory benchmark-result/matrix-primary
 ```
 
-| 항목 | 상태 |
-|---|---|
-| 5개 DB 어댑터 | 구현 완료 |
-| 자동 Recall 튜닝 | 구현 완료 |
-| 1차 본실험 | 완료, 측정 결함으로 무효 |
-| 결함 수정 후 재실행 | 1회 완료 |
-| 반복 재구축 검증 | 대기 중 |
+일부 case만 검증할 수 있습니다.
+
+```powershell
+.\scripts\run-all-benchmarks.ps1 `
+  -TestIds T03,T04,T09,T10 `
+  -Repetitions 3 `
+  -ResultDirectory benchmark-result/adapter-smoke
+```
+
+스크립트는 같은 result directory의 CSV schema가 다르면 중단합니다. 변경된 하네스 결과를 과거 CSV에 이어 쓰지 마세요.
+
+## 필터 선택도, 규모, 실제 데이터
+
+1%/10%/50% 선택도는 기존 tenant 분포를 임의 해석하지 않고 결정적 cohort를 생성합니다.
+
+```powershell
+.\scripts\run-filter-selectivity-benchmarks.ps1 `
+  -TestIds T02,T06,T08 `
+  -Repetitions 3
+```
+
+10k에서 shortlist한 2~3개 조합의 100k 또는 1M 검증은 실제 벡터 파일을 명시해야 합니다. 최소 건수 미달이면 실행하지 않습니다.
+
+```powershell
+.\scripts\run-shortlist-scale-validation.ps1 `
+  -TestIds T02,T06,T08 `
+  -Scale 100000 `
+  -DocumentVectors D:\dataset\documents-100k.jsonl `
+  -QueryVectors D:\dataset\queries-vectors.jsonl `
+  -QueryDefinitions D:\dataset\queries.jsonl
+```
+
+실제 프로젝트 FAQ/chunk/query 검증은 `synthetic:true`가 문서나 query에 하나라도 있으면 거부합니다.
+
+```powershell
+.\scripts\run-real-workload-validation.ps1 `
+  -TestIds T02,T06,T08 `
+  -DocumentVectors D:\project-data\documents.jsonl `
+  -QueryVectors D:\project-data\queries-vectors.jsonl `
+  -QueryDefinitions D:\project-data\queries.jsonl
+```
+
+## 결과
+
+원시 JSON/CSV에는 다음을 기록합니다.
+
+- test ID, run number, DB/engine/index, 목표·실제 Recall@10
+- calibration 선택 방식·Recall, 실제 search parameter
+- p50/p95/p99, 순수 검색 QPS
+- CPU Avg/Max, RAM Avg/Max, disk write
+- index size(제품 API로 분리 측정 가능한 경우), time-to-index-ready, upsert time
+- Milvus serial/concurrency Recall 표본과 진단 전후 index/load/query-segment 상태
+- 입력 SHA-256, calibration/evaluation query ID SHA-256, Docker 제한
+
+`summary/vector-db-summary.csv`는 Recall 평균/범위, median p95/QPS/자원/구축 시간을 냅니다. 기본 최종 의사결정 규칙은 `Recall ≥ 0.95`, `median p95 ≤ 30ms`, `median RAM max ≤ 2GiB`, 반복 완료, stability 진단 통과입니다. `within_target_tolerance`와 최종 `eligible`은 다른 개념입니다.
+
+성능 조건을 통과한 후보끼리는 운영 복잡도, 원본 데이터와 벡터의 정합성, 장애 복구, scale-out 필요성으로 결정합니다. 단일 latency 점수로 제품을 고르지 않습니다.
+
+## 문서
+
+- [현재 실험 프로토콜](docs/03-benchmark-design/current-protocol.md)
+- [실행 방법](docs/04-quickstart/run-benchmark.md)
+- [결과 형식](docs/06-implementation/result-format.md)
+- [DB별 구현](docs/05-databases/)
+- [과거 결과와 결함 분석](docs/07-results/)
+- [고위험 adapter 3회 수명주기 스모크](docs/07-results/adapter-smoke-20260911.md)

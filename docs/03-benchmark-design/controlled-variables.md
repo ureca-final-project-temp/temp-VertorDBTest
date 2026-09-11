@@ -1,98 +1,43 @@
 # Controlled Variables
 
-비교가 성립하려면 아래 항목이 전 DB에서 같아야 합니다.
-
-## 고정 항목
+## 고정·검증 항목
 
 | 변수 | 값 | 강제 방법 |
 |---|---|---|
-| 벡터 파일 | 동일 1024차원 JSONL | `environment`에 SHA-256 기록 |
-| Source of Truth | PostgreSQL 원문 200건 / 청크 10,000건 | Flyway + 스냅샷 SHA-256·건수 검증 |
-| 차원 | 1024 | `validateDimensions()` 불일치 시 실행 거부 |
-| distance metric | COSINE | 스토어 metric과 불일치 시 실행 거부 |
-| 인덱스 종류 | HNSW | 시나리오 `indexType`과 불일치 시 실행 거부 |
-| `M` | 16 | 프로필 YAML |
-| `ef_construction` | 128 | 프로필 YAML |
-| Top-K | 10 | 시나리오 |
-| 동시성 | 10 | 시나리오 |
-| warm-up / 측정 반복 | 1 / 5 | 시나리오 |
-| 자원 상한 | 합계 4 vCPU / 8 GiB, swap 금지 | `docker inspect` 검증, 불일치 시 중단 |
-| 제품 버전 | 표 참조 | `docker-compose.yml` 환경변수 |
+| embedding | 같은 BGE-M3 1024차원 JSONL | 입력 SHA-256 기록 |
+| source of truth | 같은 document/chunk snapshot | PostgreSQL 동기화 및 hash/count 검증 |
+| metric | cosine | store와 불일치 시 거부 |
+| topK | 10 | matrix runner |
+| target Recall | 0.90, 0.95 ±0.01 | matrix와 selector |
+| query split | calibration 100 / evaluation 200 | query-type 층화 SHA-256 |
+| 부하 | concurrency 10, warm-up 1, measurement 5 | matrix runner |
+| 반복 | 3~5 전체 재구축 | 스크립트 parameter validation |
+| 자원 | 대상 합계 4 vCPU / 8GiB / swap 없음 | `docker inspect` 불일치 시 중단 |
 
-## 제품 버전
+인덱스 생성 파라미터는 결과의 `index_parameters`, 검색 폭은 `search_parameters`에 기록합니다. 서로 다른 계열에 존재하지 않는 파라미터를 억지로 같게 만들지 않습니다.
 
-| 구성 | 버전 |
+## 버전
+
+| 구성 | 기본 버전 |
 |---|---:|
-| Java | 21 |
-| Spring Boot | 4.1.1 |
+| Java / Spring Boot | 21 / 4.1.1 |
 | PostgreSQL / pgvector | 17 / 0.8.6 |
 | Qdrant | 1.19.0 |
 | Weaviate | 1.39.3 |
 | Milvus | 3.0.1 |
 | OpenSearch | 3.8.0 |
 
-비교 실행 중에는 버전을 바꾸지 않습니다.
+OpenSearch JVector는 공식 JVector plugin을 설치한 별도 이미지에서 실행합니다.
 
 ## 자원 예산
 
-기본값은 **대상별 합계 4 vCPU / 8 GiB**입니다.
+| 대상 | 컨테이너별 배분 | 합계 |
+|---|---|---|
+| pgvector/Qdrant/Weaviate/OpenSearch | 대상 단일 컨테이너 4 vCPU/8GiB | 4 vCPU/8GiB |
+| Milvus | 본체 3 vCPU/6656MiB, etcd 0.5/512MiB, MinIO 0.5/1GiB | 4 vCPU/8GiB |
 
-| 프로필 | 컨테이너 | CPU | 메모리 |
-|---|---|---:|---:|
-| pgvector | `vector-postgres` | 4.0 | 8 GiB |
-| qdrant | `vector-qdrant` | 4.0 | 8 GiB |
-| weaviate | `vector-weaviate` | 4.0 | 8 GiB |
-| opensearch | `vector-opensearch` | 4.0 | 8 GiB |
-| milvus | `vector-milvus` | 3.0 | 6656 MiB |
-| | `vector-milvus-etcd` | 0.5 | 512 MiB |
-| | `vector-milvus-minio` | 0.5 | 1 GiB |
-| | **합계** | **4.0** | **8 GiB** |
+모든 컨테이너의 memory와 memory+swap limit를 같게 둡니다. PostgreSQL은 외부 DB 프로필에서 원본 저장소로 함께 뜨지만 검색 대상 자원 합계에서는 제외합니다.
 
-Milvus는 보조 서비스가 필요하므로 그 몫을 예산 **안에서** 나눕니다. 예산을 더 주지 않습니다.
+## 남는 환경 변수
 
-`memswap_limit`을 메모리 상한과 같게 설정해 swap을 쓸 수 없게 합니다.
-swap이 열려 있으면 메모리 압박이 지연시간으로 드러나지 않고 조용히 디스크로 새어 나갑니다.
-
-### 검증
-
-`scripts/run-all-benchmarks.ps1`이 DB 기동 직후 검사합니다.
-
-```powershell
-$actualNanoCpus      -ne $expectedNanoCpus     -or
-$actualMemoryBytes   -ne $DatabaseMemoryLimitBytes -or
-$actualMemorySwapBytes -ne $DatabaseMemoryLimitBytes
-    → throw
-```
-
-선언과 실제가 다르면 **측정을 시작하지 않습니다.**
-
-### 예산 변경
-
-```powershell
-.\scripts\run-all-benchmarks.ps1 `
-  -DatabaseCpuLimit 4.0 `
-  -DatabaseMemoryLimitBytes 8589934592
-```
-
-Milvus 보조 서비스 몫(0.5 vCPU + 512 MiB, 0.5 vCPU + 1 GiB)을 제외한 나머지가
-자동으로 본체에 할당됩니다.
-
-## 통제하지 못한 변수
-
-아래는 현재 통제되지 않으며 결과 해석에 영향을 줍니다.
-
-| 변수 | 현재 상태 |
-|---|---|
-| 클라이언트 직렬화 비용 | DB마다 다름 (JDBC 바이너리 vs JSON vs GraphQL 문자열) |
-| 클라이언트 JVM 자원 | 상한 없음. DB 컨테이너와 같은 호스트 |
-| Docker Desktop 네트워크 | Windows/WSL2 포트포워드 경유 |
-| 동시에 떠 있는 PostgreSQL | 전용 DB 프로필에서도 Source of Truth용 4 vCPU / 8 GiB가 호스트에 함께 존재하지만 측정 합계에서는 제외 |
-| 인덱스 빌드 반복 | 현재 1회. 빌드 편차를 반영하지 않음 |
-| OpenSearch JVM heap | `-Xms4g -Xmx4g` 선점. 메모리 수치가 사용량이 아님 |
-
-각 항목의 영향은 [limitations.md](limitations.md)에 있습니다.
-
-## 관련 문서
-
-- [experiment-design.md](experiment-design.md)
-- [limitations.md](limitations.md)
+클라이언트 JVM 자원, JDBC/JSON/GraphQL 직렬화 차이, Windows Docker Desktop 포트포워드, OpenSearch JVM heap 선점은 동일화하지 못합니다. 따라서 결과는 알고리즘 microbenchmark가 아니라 이 애플리케이션 검색 경로의 end-to-end 지표입니다.

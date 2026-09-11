@@ -254,7 +254,7 @@ Migration
 
 ## 9. Insert / Upsert Throughput
 
-현재 결과는 첫 시나리오에 배치 적재 경과시간 `upsert_ms`만 기록한다.
+같은 재구축을 공유하는 목표 행에는 동일한 `upsert_ms`와 `time_to_index_ready_ms`를 기록한다.
 별도 지속 부하의 초당 삽입/갱신 처리량을 직접 측정하지 않는다. 같은 건수라면
 `vector_count / (upsert_ms / 1000)`으로 단순 파생할 수 있지만, 이를 장시간 write
 throughput으로 해석하면 안 된다.

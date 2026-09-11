@@ -1,104 +1,75 @@
-# Experiment Design
+# 실험 설계
 
-## 답하려는 질문
+현재 기준은 [current-protocol.md](current-protocol.md)입니다.
 
-> 검색 품질(Recall@10)을 같은 수준으로 맞췄을 때,
-> 어떤 Vector DB가 더 낮은 지연시간과 적은 자원으로 검색을 수행하는가
+## 1. 실행 단위
 
-## 설계 원칙
-
-1. **품질을 먼저 고정하고 속도를 측정한다.** ANN은 탐색 폭을 줄이면 항상 빨라지므로 그 반대는 무의미합니다.
-2. **정답은 DB 밖에서 만든다.** Ground Truth는 Java brute-force로 계산합니다.
-3. **입력은 파일로 고정한다.** 같은 float를 다섯 DB에 재사용하고 SHA-256으로 확인합니다.
-4. **자원 상한을 검증한다.** 선언만 하지 않고 측정 직전에 `docker inspect`로 실제 값을 확인합니다.
-5. **목표를 못 맞췄으면 그렇다고 기록한다.** 숨기지 않고 `CLOSEST_AVAILABLE`로 표시합니다.
-6. **비교 모집단을 섞지 않는다.** 목표 Recall 튜닝과 ANN 비교는 무필터 질의를 사용하고,
-   필터 질의는 별도 지표로 판정합니다.
-
-## 시나리오 구조
-
-한 시나리오는 하나의 목표 Recall에 대응합니다.
-
-```json
-{
-  "database": "",
-  "indexType": "hnsw",
-  "targetRecall": 0.90,
-  "topK": 10,
-  "concurrency": 10,
-  "warmupIterations": 1,
-  "measurementIterations": 5,
-  "searchParameters": {}
-}
-```
-
-| 필드 | 의미 |
-|---|---|
-| `database` | 비우면 활성 스토어를 그대로 사용. 값이 있으면 불일치 시 실행 거부 |
-| `targetRecall` | 목표 Recall@K |
-| `concurrency` | 측정 스레드 수 |
-| `warmupIterations` | 측정 전 전체 질의를 도는 횟수 |
-| `measurementIterations` | 측정 시 전체 질의를 도는 횟수 |
-| `searchParameters` | 비우면 자동 튜닝, 값이 있으면 그대로 사용 |
-
-본실험은 목표 3개(0.80 / 0.90 / 0.95)를 한 요청에 담습니다.
-
-## 실행 순서
+`data/benchmark-matrix.json`의 같은 DB/engine/index 두 행(Recall 0.90, 0.95)을 한 번의 인덱스 재구축에서 측정합니다. 실행기는 전체 조합을 3~5회 반복합니다.
 
 ```text
-1. 입력 로드·해시 검증
-   └─ PostgreSQL Source of Truth 동기화 (200 documents / 10,000 chunks)
-2. rebuildAndLoad = true
-   ├─ indexManager.rebuild()          drop → create
-   ├─ store.upsert(...)               배치 256건
-   └─ indexManager.awaitReady(...)    비동기 인덱싱 완료 대기
-3. store.count() == chunk 수 검증      틀리면 즉시 중단
-4. Ground Truth 계산 (topK별 1회, 캐시)
-5. 시나리오마다
-   ├─ 무필터 질의 자동 튜닝 (같은 실행 조건의 목표끼리 후보 측정값 공유)
-   ├─ configureSearch(선택된 파라미터)
-   ├─ warm-up
-   └─ 본 측정  ← 여기만 타이머와 자원 샘플링 적용
-6. JSON + CSV + SVG 출력
+repeat N
+  DB 순서 교차
+    index 조합별
+      DB 시작 및 4 vCPU/8GiB 제한 검증
+      drop → create
+      vector load
+      flush/refresh/async index ready 대기
+      calibration으로 search parameter 선택
+      evaluation warm-up
+      evaluation measurement
+      결과 저장
+      DB 중지
 ```
 
-`time_to_index_ready_ms`와 `upsert_ms`는 한 실행의 **첫 시나리오에만** 기록됩니다.
-2·3번째 시나리오는 같은 인덱스를 재사용하므로 0입니다.
+각 repeat에서 다시 구축하므로 build 편차가 결과에 포함됩니다. `time_to_index_ready_ms`와 `upsert_ms`는 같은 재구축을 공유하는 두 목표 행 모두에 기록됩니다.
 
-## 부하 조건
+## 2. Query 분리
 
-| 항목 | 값 |
-|---|---|
-| 동시성 | 10 (고정 스레드 풀) |
-| warm-up | 전체 질의 1회 |
-| 측정 | 전체 질의 5회 |
-| DB·목표당 측정 요청 | 300 × 5 = 1,500건 |
-| DB당 본실험 측정 요청 | 1,500 × 3 = 4,500건 |
+기본 300개를 query type별로 층화한 뒤 query ID의 SHA-256 순서로 고정 분할합니다.
 
-자동 튜닝은 후보 9개에 대해 무필터 270개 질의로 같은 warm-up·동시성·반복을 수행합니다.
-같은 실행 조건을 가진 목표들은 이 후보 측정값을 공유합니다.
+| 용도 | 건수 | 사용 위치 |
+|---|---:|---|
+| calibration | 100 | ef/probes/nprobe/searchProbe/candidate_k 선택 |
+| evaluation | 200 | warm-up, 최종 Recall, latency, QPS |
 
-## 실행 격리
+두 집합의 ID SHA-256은 환경 정보에 저장됩니다. evaluation 결과로 파라미터를 다시 선택하면 데이터 누수이므로 금지합니다.
 
-- **한 번에 하나의 DB만 기동합니다.** 프로필로 분리하고 측정 후 컨테이너를 stop합니다.
-- PostgreSQL은 Source of Truth로 항상 떠 있지만 pgvector 프로필을 제외하면 측정 대상이 아닙니다.
-- 앱과 DB 캐시 조건을 통일한 뒤 다음 DB로 넘어갑니다.
+## 3. 측정 부하
 
-## 재현 조건
+| 항목 | 기본값 |
+|---|---:|
+| topK | 10 |
+| concurrency | 10 |
+| warm-up | evaluation 전체 1회 |
+| measurement | evaluation 전체 5회 |
+| 최종 검색 요청 | 200 × 5 = 1,000 |
 
-결과 JSON의 `environment`에 다음이 기록됩니다.
+QPS 시간 구간은 search future 제출부터 모든 search 결과 수집까지입니다. Recall 계산과 결과 직렬화는 분모에서 제외합니다.
 
-- 입력 3개 파일의 SHA-256
-- OS / CPU / 논리 코어 수 / 물리 메모리
-- Java 버전, Spring Boot 버전, Docker 서버 버전
-- 선언한 자원 예산과 `docker inspect`가 보고한 실제 컨테이너 상한
-- PostgreSQL Source of Truth의 입력 SHA-256, 원문 수, 청크 수, 이번 실행의 동기화 여부
+## 4. Recall 목표 선택
 
-이 값이 다르면 서로 다른 실험입니다.
+각 인덱스가 실제로 지원하는 한 개의 검색 폭 파라미터만 후보 그리드로 바꿉니다. calibration Recall이 목표 ±0.01에 들어오는 후보 중 비용이 작은 값을 선택하고, 없으면 가장 가까운 실제 Recall 후보를 선택합니다.
 
-## 관련 문서
+`calibration_selection`은 calibration의 선택 결과이고 `target_met`은 독립 evaluation Recall 판정입니다. 두 컬럼은 같은 의미가 아닙니다.
 
-- [controlled-variables.md](controlled-variables.md)
-- [dataset-and-queryset.md](dataset-and-queryset.md)
-- [ground-truth.md](ground-truth.md)
-- [limitations.md](limitations.md)
+## 5. 반복 및 순서
+
+기본 3회 순서는 다음과 같습니다.
+
+1. pgvector → Qdrant → Weaviate → Milvus → OpenSearch
+2. Weaviate → OpenSearch → pgvector → Qdrant → Milvus
+3. Milvus → Qdrant → OpenSearch → Weaviate → pgvector
+
+4·5회용 순서도 스크립트에 고정돼 있습니다. 최종 집계는 Recall 평균/min/max, median p95/QPS/자원/구축 시간을 사용합니다.
+
+## 6. Milvus drift 감사
+
+Milvus는 매 결과 행마다 선택된 동일 파라미터와 calibration 무필터 query를 사용해 serial 3회, 본 concurrency 3회를 추가 실행합니다. 타이머 밖에서 수행하며 성능 지표에는 섞지 않습니다. 진단 전후 index/load/query-segment 상태를 저장합니다.
+
+calibration Recall 대비 concurrent 최대 편차 또는 serial/concurrent 중앙값 차이가 기본 0.05를 넘거나 상태 수집이 실패하면 `stability_verified=false`입니다.
+
+## 7. 확장 단계
+
+- `run-filter-selectivity-benchmarks.ps1`: 1%/10%/50% 필터 workload
+- `run-shortlist-scale-validation.ps1`: 실제 100k 또는 1M 입력, 최소 건수 강제
+- `run-real-workload-validation.ps1`: 문서/query에 synthetic=true가 있으면 거부

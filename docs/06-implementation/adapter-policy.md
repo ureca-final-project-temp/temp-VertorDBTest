@@ -3,9 +3,9 @@
 어댑터를 추가하거나 고칠 때 지켜야 하는 규칙입니다.
 공정한 비교를 위한 제약이므로 편의를 이유로 어기면 결과가 무효가 됩니다.
 
-## 1. 클라이언트 라이브러리를 쓰지 않습니다
+## 1. 검색 경로에 제품별 SDK를 쓰지 않습니다
 
-pgvector를 제외한 네 DB는 모두 Java 표준 `HttpClient`를 공유합니다.
+pgvector를 제외한 네 DB의 적재·검색 경로는 모두 Java 표준 `HttpClient`를 공유합니다.
 
 ```java
 // build.gradle
@@ -16,7 +16,8 @@ pgvector를 제외한 네 DB는 모두 Java 표준 `HttpClient`를 공유합니�
 제품별 공식 SDK는 커넥션 풀, 재시도, 직렬화 최적화 수준이 제각각입니다.
 그 차이가 latency에 섞이면 "DB 비교"가 아니라 "SDK 비교"가 됩니다.
 
-pgvector만 JDBC를 쓰는 것은 선택이 아니라 필연입니다. 이 비대칭은
+Milvus 공식 Java SDK는 검색 timer 밖의 `getQuerySegmentInfo` 진단에만 사용합니다.
+pgvector만 검색 경로에서 JDBC를 쓰는 비대칭은
 [../03-benchmark-design/limitations.md](../03-benchmark-design/limitations.md)에 명시합니다.
 
 ## 2. 측정 타이머 안에서 추가 작업을 하지 않습니다
@@ -80,7 +81,8 @@ VectorHttpSupport.validateDimensions(documents, properties.getDimension());
 비동기 인덱싱을 하는 제품은 `awaitReady()`를 재정의합니다.
 "적재가 끝났다"와 "인덱스로 검색할 수 있다"는 다릅니다.
 
-준비되지 않은 상태로 측정하면 exact scan 수치를 HNSW 수치로 기록하게 됩니다.
+준비되지 않은 상태로 측정하면 exact 또는 전환 경로 수치를 ANN 수치로 기록하게 됩니다.
+Milvus는 index/load REST 상태뿐 아니라 query node의 Sealed/Flushed segment와 row 합계까지 확인합니다.
 
 ## 8. 조용한 성능 저하는 예외로 바꿉니다
 
@@ -110,11 +112,11 @@ vector.qdrant.payload-index-fields: {tenant_id: keyword, status: keyword, ...}
 ## 새 어댑터 추가 체크리스트
 
 - [ ] `VectorStore`, `VectorIndexManager` 구현
-- [ ] `<Db>Properties`에 dimension, metric, M, ef_construction, 검색 파라미터 기본값
+- [ ] `<Db>Properties`에 dimension, metric, index별 build/search 파라미터 기본값
 - [ ] `@ConditionalOnProperty(prefix="vector.store", name="type", havingValue="<db>")` Config
 - [ ] `application-<db>.yml` 프로필과 `benchmark.container-names`
 - [ ] `docker-compose.yml`에 서비스 + `cpus` / `mem_limit` / `memswap_limit`
-- [ ] `BenchmarkRunner`의 튜닝 파라미터 키 매핑
+- [ ] `VectorIndexManager.searchParameterName()`과 허용 범위 구현
 - [ ] `scripts/run-all-benchmarks.ps1`의 `Start-Database`, `Assert-DatabaseResourceBudget`, `Stop-Database`
 - [ ] `docs/05-databases/<db>.md`
 - [ ] 샘플 데이터로 smoke test 통과

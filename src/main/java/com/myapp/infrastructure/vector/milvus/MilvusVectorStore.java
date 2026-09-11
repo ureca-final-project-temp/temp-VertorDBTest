@@ -54,7 +54,8 @@ public class MilvusVectorStore implements VectorStore {
     @Override
     public List<VectorSearchResult> search(VectorSearchRequest request) {
         if (request.queryVector().length != properties.getDimension()) throw new IllegalArgumentException("Unexpected query vector dimension");
-        int ef = request.intParameter("ef", properties.getDefaultEfSearch());
+        String searchParameter = searchParameterName();
+        int searchValue = request.intParameter(searchParameter, defaultSearchValue());
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("dbName", properties.getDatabase());
         body.put("collectionName", properties.getCollection());
@@ -62,7 +63,7 @@ public class MilvusVectorStore implements VectorStore {
         body.put("annsField", "embedding");
         body.put("limit", request.topK());
         body.put("outputFields", List.of("id", "document_id", "chunk_id"));
-        body.put("searchParams", Map.of("metricType", metricType(), "params", Map.of("ef", ef)));
+        body.put("searchParams", Map.of("metricType", metricType(), "params", Map.of(searchParameter, searchValue)));
         if (!request.filter().isEmpty()) body.put("filter", filter(request.filter().equals()));
         JsonNode response = client.post("/v2/vectordb/entities/search", body);
         MilvusIndexManager.requireSuccess(response);
@@ -117,5 +118,16 @@ public class MilvusVectorStore implements VectorStore {
             case DOT -> "IP";
             case EUCLIDEAN -> "L2";
         };
+    }
+
+    private String searchParameterName() {
+        if (properties.getIndexType().equals("HNSW")) return "ef";
+        if (properties.getIndexType().equals("DISKANN")) return "search_list";
+        return "nprobe";
+    }
+
+    private int defaultSearchValue() {
+        if (properties.getIndexType().startsWith("IVF_")) return Math.min(8, properties.getIvfNlist());
+        return properties.getDefaultEfSearch();
     }
 }

@@ -51,7 +51,7 @@ public class OpenSearchVectorStore implements VectorStore {
             source.put("embedding", VectorHttpSupport.floats(document.embedding()));
             bulk.append(objectMapper.writeValueAsString(source)).append('\n');
         }
-        JsonNode response = client.sendRaw("POST", "/_bulk?refresh=wait_for", bulk.toString(), "application/x-ndjson");
+        JsonNode response = client.sendRaw("POST", "/_bulk", bulk.toString(), "application/x-ndjson");
         if (response.get("errors") != null && response.get("errors").asBoolean()) {
             throw new IllegalStateException("OpenSearch bulk request contained failures: " + response);
         }
@@ -62,8 +62,16 @@ public class OpenSearchVectorStore implements VectorStore {
         if (request.queryVector().length != properties.getDimension()) throw new IllegalArgumentException("Unexpected query vector dimension");
         Map<String, Object> fieldQuery = new LinkedHashMap<>();
         fieldQuery.put("vector", VectorHttpSupport.floats(request.queryVector()));
-        fieldQuery.put("k", request.topK());
-        fieldQuery.put("method_parameters", Map.of("ef_search", request.intParameter("ef_search", properties.getDefaultEfSearch())));
+        int candidateK = request.intParameter("candidate_k", request.topK());
+        if (candidateK < request.topK() || candidateK > 10_000) {
+            throw new IllegalArgumentException("candidate_k must be between topK and 10000");
+        }
+        fieldQuery.put("k", candidateK);
+        String searchParameter = searchParameterName();
+        if (searchParameter != null) {
+            int defaultValue = searchParameter.equals("nprobes") ? 1 : properties.getDefaultEfSearch();
+            fieldQuery.put("method_parameters", Map.of(searchParameter, request.intParameter(searchParameter, defaultValue)));
+        }
         if (!request.filter().isEmpty()) fieldQuery.put("filter", filter(request.filter().equals()));
         Map<String, Object> body = Map.of("size", request.topK(), "_source", List.of("id", "documentId", "chunkId"),
                 "query", Map.of("knn", Map.of("embedding", fieldQuery)));
@@ -85,6 +93,11 @@ public class OpenSearchVectorStore implements VectorStore {
             return Map.<String, Object>of("term", Map.of(field, entry.getValue()));
         }).toList();
         return clauses.size() == 1 ? clauses.getFirst() : Map.of("bool", Map.of("filter", clauses));
+    }
+
+    private String searchParameterName() {
+        if (!properties.getEngine().equals("faiss")) return null;
+        return properties.getIndexType().equals("ivf") ? "nprobes" : "ef_search";
     }
 
     @Override

@@ -57,6 +57,7 @@ services:
       AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
       PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
       CLUSTER_HOSTNAME: "node1"
+      ASYNC_INDEXING: "true"
     cpus: ${VECTOR_CPU_LIMIT:-4.0}
     mem_limit: ${VECTOR_MEMORY_LIMIT:-8g}
     memswap_limit: ${VECTOR_MEMORY_LIMIT:-8g}
@@ -135,6 +136,7 @@ services:
       - "${MILVUS_WEBUI_PORT:-9091}:9091"
     volumes:
       - milvus_data:/var/lib/milvus
+      - ./docker/milvus/user.yaml:/milvus/configs/user.yaml:ro
     depends_on:
       milvus-etcd:
         condition: service_healthy
@@ -184,6 +186,40 @@ services:
     networks:
       - vector-net
 
+  opensearch-jvector:
+    build:
+      context: .
+      dockerfile: docker/opensearch-jvector/Dockerfile
+      args:
+        OPENSEARCH_VERSION: ${OPENSEARCH_VERSION:-3.8.0}
+    image: vector-opensearch-jvector:${OPENSEARCH_VERSION:-3.8.0}
+    container_name: vector-opensearch-jvector
+    profiles: ["opensearch-jvector"]
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      bootstrap.memory_lock: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: "${OPENSEARCH_JAVA_OPTS:--Xms4g -Xmx4g}"
+    ports:
+      - "${OPENSEARCH_JVECTOR_HTTP_PORT:-19200}:9200"
+      - "${OPENSEARCH_JVECTOR_PERF_PORT:-19600}:9600"
+    volumes:
+      - opensearch_jvector_data:/usr/share/opensearch/data
+    cpus: ${VECTOR_CPU_LIMIT:-4.0}
+    mem_limit: ${VECTOR_MEMORY_LIMIT:-8g}
+    memswap_limit: ${VECTOR_MEMORY_LIMIT:-8g}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    networks:
+      - vector-net
+
 networks:
   vector-net:
     name: vector-db-benchmark-net
@@ -196,3 +232,4 @@ volumes:
   milvus_minio_data:
   milvus_data:
   opensearch_data:
+  opensearch_jvector_data:

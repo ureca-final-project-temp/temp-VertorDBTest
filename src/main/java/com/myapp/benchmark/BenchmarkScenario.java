@@ -3,7 +3,10 @@ package com.myapp.benchmark;
 import java.util.Map;
 
 public record BenchmarkScenario(
+        String testId,
+        int runNumber,
         String database,
+        String engine,
         String indexType,
         double targetRecall,
         int topK,
@@ -13,6 +16,10 @@ public record BenchmarkScenario(
         Map<String, Object> searchParameters
 ) {
     public BenchmarkScenario {
+        runNumber = runNumber < 1 ? 1 : runNumber;
+        if (testId != null && !testId.isBlank() && !testId.matches("T\\d{2}")) {
+            throw new IllegalArgumentException("testId must match T followed by two digits");
+        }
         if (targetRecall <= 0 || targetRecall > 1) throw new IllegalArgumentException("targetRecall must be in (0, 1]");
         if (topK < 1) throw new IllegalArgumentException("topK must be positive");
         if (concurrency < 1) throw new IllegalArgumentException("concurrency must be positive");

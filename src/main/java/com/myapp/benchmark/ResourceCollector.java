@@ -101,10 +101,12 @@ public class ResourceCollector {
         static Usage summarize(Snapshot baseline, List<Snapshot> measured) {
             if (measured.isEmpty()) return Usage.UNAVAILABLE;
             double averageCpu = measured.stream().mapToDouble(Snapshot::cpuPercent).average().orElse(0);
+            double peakCpu = measured.stream().mapToDouble(Snapshot::cpuPercent).max().orElse(-1);
+            long averageMemory = (long) measured.stream().mapToLong(Snapshot::memoryBytes).average().orElse(-1);
             long peakMemory = measured.stream().mapToLong(Snapshot::memoryBytes).max().orElse(-1);
             long firstWrite = baseline == null ? measured.getFirst().diskWriteBytes() : baseline.diskWriteBytes();
             long lastWrite = measured.getLast().diskWriteBytes();
-            return new Usage(averageCpu, peakMemory, Math.max(0, lastWrite - firstWrite));
+            return new Usage(averageCpu, peakCpu, averageMemory, peakMemory, Math.max(0, lastWrite - firstWrite));
         }
 
         @Override
@@ -137,7 +139,13 @@ public class ResourceCollector {
     record Snapshot(double cpuPercent, long memoryBytes, long diskWriteBytes) {
     }
 
-    public record Usage(double averageCpuPercent, long peakMemoryBytes, long diskWriteBytes) {
-        public static final Usage UNAVAILABLE = new Usage(-1, -1, -1);
+    public record Usage(
+            double averageCpuPercent,
+            double peakCpuPercent,
+            long averageMemoryBytes,
+            long peakMemoryBytes,
+            long diskWriteBytes
+    ) {
+        public static final Usage UNAVAILABLE = new Usage(-1, -1, -1, -1, -1);
     }
 }

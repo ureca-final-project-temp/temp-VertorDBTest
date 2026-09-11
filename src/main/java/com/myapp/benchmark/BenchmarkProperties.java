@@ -17,7 +17,10 @@ public class BenchmarkProperties {
     private List<String> containerNames = new ArrayList<>();
     private int upsertBatchSize = 256;
     private List<Integer> autoTuneCandidates = new ArrayList<>(List.of(10, 20, 40, 80, 120, 200, 400, 800, 1000));
+    private int calibrationQueryCount = 100;
     private double targetRecallTolerance = 0.01;
+    private int driftDiagnosticRepetitions = 3;
+    private double driftThreshold = 0.05;
     private double resourceBudgetCpu = 4.0;
     private long resourceBudgetMemoryBytes = 8L * 1024 * 1024 * 1024;
 
@@ -39,10 +42,18 @@ public class BenchmarkProperties {
     public void setUpsertBatchSize(int upsertBatchSize) { this.upsertBatchSize = upsertBatchSize; }
     public List<Integer> getAutoTuneCandidates() { return autoTuneCandidates; }
     public void setAutoTuneCandidates(List<Integer> autoTuneCandidates) { this.autoTuneCandidates = autoTuneCandidates; }
+    public int getCalibrationQueryCount() { return calibrationQueryCount; }
+    public void setCalibrationQueryCount(int calibrationQueryCount) { this.calibrationQueryCount = calibrationQueryCount; }
     public double getTargetRecallTolerance() { return targetRecallTolerance; }
     public void setTargetRecallTolerance(double targetRecallTolerance) {
         this.targetRecallTolerance = targetRecallTolerance;
     }
+    public int getDriftDiagnosticRepetitions() { return driftDiagnosticRepetitions; }
+    public void setDriftDiagnosticRepetitions(int driftDiagnosticRepetitions) {
+        this.driftDiagnosticRepetitions = driftDiagnosticRepetitions;
+    }
+    public double getDriftThreshold() { return driftThreshold; }
+    public void setDriftThreshold(double driftThreshold) { this.driftThreshold = driftThreshold; }
     public double getResourceBudgetCpu() { return resourceBudgetCpu; }
     public void setResourceBudgetCpu(double resourceBudgetCpu) { this.resourceBudgetCpu = resourceBudgetCpu; }
     public long getResourceBudgetMemoryBytes() { return resourceBudgetMemoryBytes; }

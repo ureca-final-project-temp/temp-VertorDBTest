@@ -1,130 +1,39 @@
 # Milvus
 
-전용 Vector DB. standalone 모드에서도 etcd와 MinIO가 필요합니다. REST v2 API를 사용합니다.
+Native engine에서 HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, DISKANN(T11~T20)을 측정합니다. standalone 본체·etcd·MinIO 합계에 4 vCPU/8GiB 제한을 적용합니다.
 
-## 설정
+## 인덱스와 검색 파라미터
 
-`src/main/resources/application-milvus.yml`
+| Index | Build | Search |
+|---|---|---|
+| HNSW | M=16, efConstruction=128 | ef |
+| IVF_FLAT | nlist=128 | nprobe |
+| IVF_SQ8 | nlist=128 | nprobe |
+| IVF_PQ | nlist=128, m=64, nbits=8 | nprobe |
+| DISKANN | server default build params | search_list |
 
-```yaml
-vector.milvus:
-  base-url: http://localhost:19530
-  token: root:Milvus
-  database: default
-  collection: benchmark_chunks
-  dimension: 1024
-  metric: COSINE
-  hnsw-m: 16
-  ef-construction: 128
-  default-ef-search: 100
-```
+IVF_PQ는 dimension이 `m`으로 나누어떨어지지 않으면 실행을 거부합니다. DISKANN을 위해 `docker/milvus/user.yaml`의 `queryNode.enableDisk: true`를 container config overlay로 mount합니다.
 
-## 컬렉션 생성
+## 준비 장벽
 
-```json
-POST /v2/vectordb/collections/create
-{
-  "collectionName": "benchmark_chunks",
-  "schema": {
-    "autoId": false, "enabledDynamicField": false,
-    "fields": [
-      {"fieldName":"id","dataType":"VarChar","isPrimary":true,"elementTypeParams":{"max_length":"256"}},
-      {"fieldName":"metadata","dataType":"JSON","elementTypeParams":{}},
-      {"fieldName":"embedding","dataType":"FloatVector","elementTypeParams":{"dim":"1024"}}
-    ]
-  },
-  "indexParams": [{
-    "metricType":"COSINE","fieldName":"embedding","indexName":"embedding_hnsw",
-    "indexType":"HNSW","params":{"M":16,"efConstruction":128}
-  }]
-}
-```
+insert 뒤 `collections/flush`와 비동기 `collections/load`를 호출합니다. `indexes/describe`의 `indexState=Finished`, indexed rows 전체 이상, pending rows 0과 `get_load_state`의 `LoadStateLoaded`, progress 100%만으로는 부족합니다. 공식 SDK `getQuerySegmentInfo`에도 기대 row 전체와 index name을 가진 Sealed/Flushed segment가 나타날 때까지 기다립니다. growing segment나 query-node load 전환 경로를 ANN 결과로 잘못 측정하지 않습니다.
 
-## 검색
+## drift 진단
 
-```json
-POST /v2/vectordb/entities/search
-{
-  "collectionName": "benchmark_chunks",
-  "data": [[0.021, -0.118, ...]],
-  "annsField": "embedding",
-  "limit": 10,
-  "outputFields": ["id", "document_id", "chunk_id"],
-  "searchParams": {"metricType": "COSINE", "params": {"ef": 80}},
-  "filter": "metadata[\"tenant_id\"] == \"alpha\" and metadata[\"status\"] == \"active\""
-}
-```
+과거 단일 실행에서 calibration 0.9578 → 본 측정 0.7422가 관측됐으므로 Milvus는 자동 stability audit 대상입니다. 각 결과 행에서 선택된 같은 파라미터와 calibration 무필터 query를 사용해 serial 3회와 concurrency 10의 3회를 추가 실행합니다.
 
-## Sharp edges
+원인은 REST index/load 상태가 완료여도 query node의 segment 목록이 아직 비어 있던 readiness 간극이었습니다. SDK segment barrier를 추가한 뒤 HNSW T12와 IVF 계열 재구축 3회에서 같은 형태의 drift는 재현되지 않았습니다. 상세 증거는 [adapter smoke](../07-results/adapter-smoke-20260911.md)에 있습니다.
 
-### flush 없이 측정하면 HNSW가 아닙니다
+공식 Java SDK의 `getQuerySegmentInfo`로 segment ID/state/rows/memory/index/node 정보를 받고 REST로 index state와 load state를 진단 전후 저장합니다. calibration 대비 concurrent 최대 편차나 serial/concurrent 중앙값 차이가 기본 0.05를 넘거나 상태 수집이 실패하면 실패입니다. 반복 집계에서도 재구축 간 evaluation Recall max-min이 0.05를 넘으면 `stability_verified=false`이며 최종 eligible에서 제외됩니다.
 
-삽입한 데이터는 먼저 growing segment에 들어갑니다. 이 상태에서는 Milvus가 인덱스가 아니라
-brute-force로 검색합니다. `flush`로 segment를 봉인해야 HNSW가 만들어집니다.
+진단 검색은 최종 QPS/latency timer 밖입니다.
 
-`awaitReady()`가 이 장벽을 담당합니다.
+## 필터와 크기
 
-```java
-requireSuccess(client.post("/v2/vectordb/collections/flush", identity()));
-// 이후 indexState=Finished, indexedRows >= 전체, pendingRows == 0 까지 대기
-```
-
-이 대기 없이 측정하면 Recall은 1.0에 가깝고 latency는 exact 수준으로 나옵니다.
-
-### 자원 예산을 세 컨테이너가 나눠 씁니다
-
-| 컨테이너 | CPU | 메모리 |
-|---|---:|---:|
-| `vector-milvus` | 3.0 | 6656 MiB |
-| `vector-milvus-etcd` | 0.5 | 512 MiB |
-| `vector-milvus-minio` | 0.5 | 1 GiB |
-| 합계 | 4.0 | 8 GiB |
-
-다른 DB와 **합계가 같습니다.** 보조 서비스 때문에 예산을 더 주지 않습니다.
-CPU·메모리 지표도 세 컨테이너 합산입니다.
-
-### 결과가 비결정적입니다
-
-여러 segment에 걸친 검색이라 같은 파라미터에서도 Recall이 미세하게 흔들립니다.
-튜닝 Recall과 본 측정 Recall이 달라질 수 있으므로 선택 표시만 보지 말고 본 측정의
-`comparison_recall`과 `target_met`을 함께 확인해야 합니다.
-
-```text
-tuning_recall 0.9578  →  comparison_recall 0.7422, target_met=false
-```
-
-위 값은 2026-09-11 단일 재실행에서 관측한 큰 변동 사례이며, 모든 실행에서 같은 폭으로
-발생한다는 뜻은 아닙니다.
-
-### metadata가 JSON 필드입니다
-
-`metadata`를 JSON 타입으로 저장하고 필터는 `metadata["key"] == "value"` 표현식을 씁니다.
-JSON path index를 만들지 않았으므로 필터 평가 비용이 필드 인덱스보다 높습니다.
-
-### index_size_bytes 미지원
-
-`-1`로 기록됩니다.
-
-## 확인
-
-```powershell
-Invoke-RestMethod http://localhost:9091/healthz
-
-Invoke-RestMethod -Method Post http://localhost:19530/v2/vectordb/indexes/describe `
-  -ContentType application/json `
-  -Headers @{Authorization='Bearer root:Milvus'} `
-  -Body '{"collectionName":"benchmark_chunks","indexName":"embedding_hnsw"}'
-```
-
-`indexState`가 `Finished`, `pendingRows`가 0이어야 합니다.
-
-## 코드
-
-- `infrastructure/vector/milvus/MilvusVectorStore.java`
-- `infrastructure/vector/milvus/MilvusIndexManager.java`
-- `infrastructure/vector/milvus/MilvusProperties.java`
+metadata는 JSON field 표현식으로 필터합니다. JSON path index는 주 matrix에 포함하지 않았습니다. 순수 per-index size를 REST 결과에서 분리하지 않으므로 `index_size_bytes=-1`입니다.
 
 ## 참고
 
-- [Milvus deployment options](https://milvus.io/docs/install-overview.md)
-- [Milvus architecture](https://milvus.io/docs/architecture_overview.md)
+- [Milvus disk index](https://milvus.io/docs/disk_index.md)
+- [Milvus query node disk 설정](https://milvus.io/docs/configure_querynode.md)
+- [Java SDK getQuerySegmentInfo](https://milvus.io/api-reference/java/v3.0.x/v2/Management/getQuerySegmentInfo.md)

@@ -60,7 +60,7 @@ String key = switch (store.database().toLowerCase()) {
 ## 자동 튜닝
 
 `searchParameters: {}`로 요청하면 후보 `[10, 20, 40, 80, 120, 200, 400, 800, 1000]` 전체를
-무필터 270개 질의에 대해 본 측정과 같은 warm-up·동시성·반복 횟수로 시험한 뒤,
+calibration 100개 중 무필터 질의에 대해 본 측정과 같은 warm-up·동시성·반복 횟수로 시험한 뒤,
 목표 Recall 구간에 드는 **가장 작은** 값을 고릅니다.
 
 ```text

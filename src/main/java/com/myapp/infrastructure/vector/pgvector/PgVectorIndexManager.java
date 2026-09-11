@@ -17,7 +17,27 @@ public class PgVectorIndexManager implements VectorIndexManager {
 
     @Override
     public String indexType() {
-        return "hnsw";
+        return properties.getIndexType();
+    }
+
+    @Override
+    public String engine() {
+        return "PostgreSQL";
+    }
+
+    @Override
+    public String searchParameterName() {
+        return indexType().equals("ivfflat") ? "probes" : "ef_search";
+    }
+
+    @Override
+    public int minimumSearchParameter(int topK) {
+        return indexType().equals("ivfflat") ? 1 : topK;
+    }
+
+    @Override
+    public int maximumSearchParameter() {
+        return indexType().equals("ivfflat") ? properties.getIvfLists() : Integer.MAX_VALUE;
     }
 
     @Override
@@ -34,9 +54,15 @@ public class PgVectorIndexManager implements VectorIndexManager {
                     metadata JSONB NOT NULL DEFAULT '{}'::jsonb
                 )
                 """.formatted(table, properties.getDimension()));
-        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS " + table + "_hnsw_idx ON " + table
-                + " USING hnsw (embedding " + operatorClass() + ") WITH (m = " + properties.getHnswM()
-                + ", ef_construction = " + properties.getEfConstruction() + ")");
+        if (indexType().equals("hnsw")) {
+            jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS " + indexName() + " ON " + table
+                    + " USING hnsw (embedding " + operatorClass() + ") WITH (m = " + properties.getHnswM()
+                    + ", ef_construction = " + properties.getEfConstruction() + ")");
+        } else {
+            if (properties.getIvfLists() < 1) throw new IllegalStateException("ivf-lists must be positive");
+            jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS " + indexName() + " ON " + table
+                    + " USING ivfflat (embedding " + operatorClass() + ") WITH (lists = " + properties.getIvfLists() + ")");
+        }
     }
 
     @Override
@@ -47,19 +73,27 @@ public class PgVectorIndexManager implements VectorIndexManager {
     @Override
     public long indexSizeBytes() {
         Long bytes = jdbcTemplate.queryForObject(
-                "SELECT COALESCE(pg_relation_size(?), 0)", Long.class, properties.getTable() + "_hnsw_idx");
+                "SELECT COALESCE(pg_relation_size(?), 0)", Long.class, indexName());
         return bytes == null ? -1 : bytes;
     }
 
     @Override
     public Map<String, Object> indexParameters() {
-        return Map.of(
-                "m", properties.getHnswM(),
-                "ef_construction", properties.getEfConstruction(),
-                "metric", properties.getMetric().name(),
-                "dimension", properties.getDimension(),
-                "force_index_scan", properties.isForceIndexScan()
-        );
+        Map<String, Object> parameters = new java.util.LinkedHashMap<>();
+        if (indexType().equals("hnsw")) {
+            parameters.put("m", properties.getHnswM());
+            parameters.put("ef_construction", properties.getEfConstruction());
+        } else {
+            parameters.put("lists", properties.getIvfLists());
+        }
+        parameters.put("metric", properties.getMetric().name());
+        parameters.put("dimension", properties.getDimension());
+        parameters.put("force_index_scan", properties.isForceIndexScan());
+        return Map.copyOf(parameters);
+    }
+
+    private String indexName() {
+        return properties.getTable() + "_" + indexType() + "_idx";
     }
 
     private String operatorClass() {

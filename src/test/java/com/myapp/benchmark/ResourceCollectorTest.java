@@ -22,6 +22,8 @@ class ResourceCollectorTest {
                 new ResourceCollector.Snapshot(120, 250, 2_200)));
 
         assertThat(usage.averageCpuPercent()).isEqualTo(100);
+        assertThat(usage.peakCpuPercent()).isEqualTo(120);
+        assertThat(usage.averageMemoryBytes()).isEqualTo(225);
         assertThat(usage.peakMemoryBytes()).isEqualTo(250);
         assertThat(usage.diskWriteBytes()).isEqualTo(1_200);
     }

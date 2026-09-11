@@ -69,13 +69,16 @@ public class PgVectorStore implements VectorStore {
     @Override
     public List<VectorSearchResult> search(VectorSearchRequest request) {
         if (request.queryVector().length != properties.getDimension()) throw new IllegalArgumentException("Unexpected query vector dimension");
-        int efSearch = request.intParameter("ef_search", properties.getDefaultEfSearch());
-        if (efSearch < 1) throw new IllegalArgumentException("ef_search must be positive");
+        boolean ivf = properties.getIndexType().equals("ivfflat");
+        String parameterName = ivf ? "probes" : "ef_search";
+        int searchValue = request.intParameter(parameterName, ivf ? 1 : properties.getDefaultEfSearch());
+        if (searchValue < 1) throw new IllegalArgumentException(parameterName + " must be positive");
         return jdbcTemplate.execute((ConnectionCallback<List<VectorSearchResult>>) connection -> {
             try (PreparedStatement setting = connection.prepareStatement(
-                    "SELECT set_config('hnsw.ef_search', ?, false), set_config('enable_seqscan', ?, false)")) {
-                setting.setString(1, Integer.toString(efSearch));
-                setting.setString(2, properties.isForceIndexScan() ? "off" : "on");
+                    "SELECT set_config(?, ?, false), set_config('enable_seqscan', ?, false)")) {
+                setting.setString(1, ivf ? "ivfflat.probes" : "hnsw.ef_search");
+                setting.setString(2, Integer.toString(searchValue));
+                setting.setString(3, properties.isForceIndexScan() ? "off" : "on");
                 setting.execute();
             }
             String operator = operator();

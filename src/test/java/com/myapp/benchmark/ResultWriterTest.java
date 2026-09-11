@@ -23,10 +23,12 @@ class ResultWriterTest {
 
         List<String> lines = readCsv(directory);
         assertThat(lines).hasSize(2);
-        assertThat(columns(lines.getFirst())).hasSize(42);
+        assertThat(columns(lines.getFirst())).hasSize(49);
         assertThat(columns(lines.get(1))).hasSize(columns(lines.getFirst()).size());
         assertThat(lines.getFirst()).contains("filtered_p95_ms", "unfiltered_p95_ms", "unfiltered_recall");
         assertThat(lines.getFirst()).contains("comparison_recall");
+        assertThat(lines.getFirst()).contains("calibration_selection", "calibration_recall",
+                "stability_verified", "stability_diagnostics");
         assertThat(lines.get(1)).contains("90.000000", "7.000000");
     }
 
@@ -66,10 +68,11 @@ class ResultWriterTest {
 
     private BenchmarkResult result(QuerySegment filtered, QuerySegment unfiltered) {
         Double comparisonRecall = unfiltered.recall() == null ? 0.9412 : unfiltered.recall();
-        return new BenchmarkResult("qdrant", "hnsw", 0.95, 0.9412, comparisonRecall,
+        return new BenchmarkResult("T05", 1, "qdrant", "Native", "hnsw", 0.95, 0.9412, comparisonRecall,
                 0.01, true, "WITHIN_TOLERANCE", 0.9412,
                 8.1, 3.6, 12.0, 40.0, 1820.5, filtered, unfiltered,
-                131.6, 102_000_000L, 4_096L, -1L, 5_143L, 3_891L, 10_000, 1_500, 10, 10, 1, 5,
+                131.6, 190.2, 95_000_000L, 102_000_000L, 4_096L, -1L, 5_143L, 3_891L, 10_000, 1_500, 10, 10, 1, 5,
+                StabilityDiagnostics.notRequired(),
                 Map.of("m", 16), Map.of("hnsw_ef", 400), Map.of("metric", "COSINE"), Instant.now());
     }
 }

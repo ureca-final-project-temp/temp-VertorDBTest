@@ -22,6 +22,12 @@ public class QdrantIndexManager implements VectorIndexManager {
     public String indexType() { return "hnsw"; }
 
     @Override
+    public String engine() { return "Native"; }
+
+    @Override
+    public String searchParameterName() { return "hnsw_ef"; }
+
+    @Override
     public void create() {
         client.put("/collections/" + properties.getCollection(), Map.of(
                 "vectors", Map.of("size", properties.getDimension(), "distance", distance()),

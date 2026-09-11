@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.time.Duration;
 
 public class WeaviateIndexManager implements VectorIndexManager {
     private final JsonHttpClient client;
@@ -21,7 +22,16 @@ public class WeaviateIndexManager implements VectorIndexManager {
     }
 
     @Override
-    public String indexType() { return "hnsw"; }
+    public String indexType() { return properties.getIndexType(); }
+
+    @Override
+    public String engine() { return "Native"; }
+
+    @Override
+    public String searchParameterName() { return indexType().equals("hfresh") ? "searchProbe" : "ef"; }
+
+    @Override
+    public int minimumSearchParameter(int topK) { return indexType().equals("hfresh") ? 1 : topK; }
 
     @Override
     public void create() {
@@ -33,10 +43,21 @@ public class WeaviateIndexManager implements VectorIndexManager {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("class", properties.getClassName());
         body.put("vectorizer", "none");
-        body.put("vectorIndexType", "hnsw");
-        body.put("vectorIndexConfig", Map.of(
-                "distance", distance(), "maxConnections", properties.getHnswM(),
-                "efConstruction", properties.getEfConstruction(), "ef", properties.getEf()));
+        body.put("vectorIndexType", indexType());
+        if (indexType().equals("hnsw")) {
+            body.put("vectorIndexConfig", Map.of(
+                    "distance", distance(), "maxConnections", properties.getHnswM(),
+                    "efConstruction", properties.getEfConstruction(), "ef", properties.getEf()));
+        } else {
+            if (properties.getMetric() == com.myapp.domain.vector.DistanceMetric.DOT) {
+                throw new IllegalStateException("Weaviate HFresh does not support dot distance");
+            }
+            body.put("vectorIndexConfig", Map.of(
+                    "distance", distance(),
+                    "maxPostingSizeKB", properties.getHfreshMaxPostingSizeKb(),
+                    "replicas", properties.getHfreshReplicas(),
+                    "searchProbe", properties.getHfreshSearchProbe()));
+        }
         body.put("properties", fields);
         client.post("/v1/schema", body);
     }
@@ -52,27 +73,66 @@ public class WeaviateIndexManager implements VectorIndexManager {
 
     @Override
     public void configureSearch(Map<String, Object> searchParameters) {
-        Object requested = searchParameters.get("ef");
+        String parameterName = searchParameterName();
+        Object requested = searchParameters.get(parameterName);
         if (requested == null) return;
-        int ef = requested instanceof Number number ? number.intValue() : Integer.parseInt(requested.toString());
-        if (ef < 1) throw new IllegalArgumentException("ef must be positive");
+        int value = requested instanceof Number number ? number.intValue() : Integer.parseInt(requested.toString());
+        if (value < 1) throw new IllegalArgumentException(parameterName + " must be positive");
         JsonNode current = client.get("/v1/schema/" + properties.getClassName());
         JsonNode vectorIndexConfig = current.get("vectorIndexConfig");
         if (!(current instanceof ObjectNode) || !(vectorIndexConfig instanceof ObjectNode config)) {
             throw new IllegalStateException("Weaviate returned an invalid class schema");
         }
-        config.put("ef", ef);
+        config.put(parameterName, value);
         client.put("/v1/schema/" + properties.getClassName(), current);
     }
 
     @Override
+    public void awaitReady(long expectedVectorCount, Duration timeout) {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            JsonNode nodes = client.get("/v1/nodes?output=verbose&class=" + properties.getClassName()).get("nodes");
+            long objectCount = 0;
+            long queueLength = 0;
+            boolean found = false;
+            if (nodes != null && nodes.isArray()) {
+                for (JsonNode node : nodes) {
+                    JsonNode shards = node.get("shards");
+                    if (shards == null || !shards.isArray()) continue;
+                    for (JsonNode shard : shards) {
+                        if (shard.get("class") == null || !properties.getClassName().equals(shard.get("class").asString())) continue;
+                        found = true;
+                        objectCount += shard.get("objectCount") == null ? 0 : shard.get("objectCount").asLong();
+                        queueLength += shard.get("vectorQueueLength") == null ? 0 : shard.get("vectorQueueLength").asLong();
+                    }
+                }
+            }
+            if (found && objectCount >= expectedVectorCount && queueLength == 0) return;
+            try {
+                Thread.sleep(250);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while waiting for Weaviate indexing", exception);
+            }
+        }
+        throw new IllegalStateException("Weaviate " + indexType() + " index did not become ready within " + timeout);
+    }
+
+    @Override
     public Map<String, Object> indexParameters() {
+        if (indexType().equals("hnsw")) {
+            return Map.of(
+                    "maxConnections", properties.getHnswM(),
+                    "efConstruction", properties.getEfConstruction(),
+                    "distance", distance(),
+                    "dimension", properties.getDimension());
+        }
         return Map.of(
-                "maxConnections", properties.getHnswM(),
-                "efConstruction", properties.getEfConstruction(),
+                "maxPostingSizeKB", properties.getHfreshMaxPostingSizeKb(),
+                "replicas", properties.getHfreshReplicas(),
+                "rqBits", 1,
                 "distance", distance(),
-                "dimension", properties.getDimension()
-        );
+                "dimension", properties.getDimension());
     }
 
     private Map<String, Object> property(String name, String type) {

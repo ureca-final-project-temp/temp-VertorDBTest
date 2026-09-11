@@ -41,14 +41,19 @@ Weaviate는 `1 - distance`, Milvus는 EUCLIDEAN일 때 `-distance`로 변환합�
 ```java
 public interface VectorIndexManager {
     String indexType();
+    String engine();
+    String searchParameterName();
     void create();
     void drop();
 
     default void rebuild() { drop(); create(); }
+    default void rebuild(List<VectorDocument> trainingDocuments) { rebuild(); }
     default long indexSizeBytes() { return -1L; }
     default Map<String, Object> indexParameters() { return Map.of(); }
     default void configureSearch(Map<String, Object> searchParameters) { }
     default void awaitReady(long expectedVectorCount, Duration timeout) { }
+    default boolean requiresStabilityCheck() { return false; }
+    default Map<String, Object> diagnostics() { return Map.of(); }
 }
 ```
 
@@ -56,8 +61,10 @@ default 구현이 있는 메서드는 **필요한 제품만 재정의합니다.*
 
 | 메서드 | 재정의하는 제품 | 이유 |
 |---|---|---|
-| `configureSearch()` | Weaviate | `ef`가 요청별이 아니라 클래스 설정 |
-| `awaitReady()` | Qdrant, Milvus | 비동기 인덱싱 완료 장벽 |
+| `rebuild(documents)` | OpenSearch Faiss IVF | model training이 먼저 필요 |
+| `configureSearch()` | Weaviate | `ef`/`searchProbe`가 요청별이 아니라 클래스 설정 |
+| `awaitReady()` | Qdrant, Weaviate, Milvus, OpenSearch | 비동기 인덱싱/refresh/load 완료 장벽 |
+| `diagnostics()` | Milvus | index/load/query-segment 상태와 drift 근거 |
 | `indexSizeBytes()` | pgvector, OpenSearch | 나머지는 미지원(`-1`) |
 
 `drop()`은 대상이 없어도 성공해야 합니다. 첫 실행에서 `rebuild()`가 실패하면 안 되기 때문입니다.

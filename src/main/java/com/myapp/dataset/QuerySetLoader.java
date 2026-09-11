@@ -23,20 +23,29 @@ public class QuerySetLoader {
             String id = JsonlSupport.text(node, "queryId", "query_id", "id");
             if (id == null) throw new IllegalArgumentException("Query definition is missing queryId");
             Map<String, Object> filter = JsonlSupport.object(node, objectMapper, "filter");
-            definitions.put(id, new Definition(JsonlSupport.text(node, "query", "text"), filter));
+            definitions.put(id, new Definition(
+                    JsonlSupport.text(node, "query", "text"),
+                    JsonlSupport.text(node, "queryType", "query_type"),
+                    node.get("synthetic") != null && node.get("synthetic").asBoolean(),
+                    filter));
         }
 
         List<BenchmarkQuery> queries = JsonlSupport.readMapped(vectorsPath, objectMapper, node -> {
             String id = JsonlSupport.text(node, "queryId", "query_id", "id");
-            Definition definition = definitions.getOrDefault(id, new Definition(JsonlSupport.text(node, "query", "text"), Map.of()));
+            Definition definition = definitions.getOrDefault(id, new Definition(
+                    JsonlSupport.text(node, "query", "text"),
+                    JsonlSupport.text(node, "queryType", "query_type"),
+                    node.get("synthetic") != null && node.get("synthetic").asBoolean(),
+                    Map.of()));
             Map<String, Object> inlineFilter = JsonlSupport.object(node, objectMapper, "filter");
             Map<String, Object> filter = inlineFilter.isEmpty() ? definition.filter() : inlineFilter;
-            return new BenchmarkQuery(id, definition.query(), JsonlSupport.vector(node, "embedding", "vector"), new VectorFilter(filter));
+            return new BenchmarkQuery(id, definition.query(), definition.queryType(), definition.synthetic(),
+                    JsonlSupport.vector(node, "embedding", "vector"), new VectorFilter(filter));
         });
         if (queries.isEmpty()) throw new IllegalStateException("Query vector dataset is empty: " + vectorsPath);
         return queries;
     }
 
-    private record Definition(String query, Map<String, Object> filter) {
+    private record Definition(String query, String queryType, boolean synthetic, Map<String, Object> filter) {
     }
 }

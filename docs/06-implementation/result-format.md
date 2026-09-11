@@ -1,173 +1,75 @@
-# Result Format
+# 결과 형식
 
 ## 디렉터리
 
 ```text
-benchmark-result/<dir>/
-├─ raw/
-│  ├─ ground-truth-top10.jsonl        정답지
-│  └─ benchmark-<run-id>.json         실행별 전체 결과
-├─ csv/
-│  └─ vector-db-result.csv            누적 비교표 (append)
-├─ charts/
-│  ├─ recall-latency-<run-id>.svg
-│  └─ recall-latency-latest.svg       해당 디렉터리의 모든 raw를 합쳐 재생성
-└─ logs/                              run-all-benchmarks.ps1 실행 시
+<result-directory>/
+├─ raw/benchmark-*.json
+├─ raw/ground-truth-top10.jsonl
+├─ csv/vector-db-result.csv
+├─ charts/recall-latency-latest.svg
+├─ logs/
+├─ api-response-run-*.json
+├─ execution-order.json
+└─ summary/vector-db-summary.csv
 ```
 
-`run-id`는 첫 결과의 `measuredAt`을 UTC `yyyyMMdd-HHmmss-SSS`로 포맷한 값입니다.
+CSV schema가 기존 파일과 다르면 이어 쓰지 않고 중단합니다. 하네스 변경 뒤에는 새 result directory를 사용합니다.
 
-## ground-truth-top10.jsonl
-
-```json
-{"queryId":"q-001","topK":["chunk-000-00","chunk-000-04", ...]}
-```
-
-다른 도구에서 Recall을 독립 재검산할 때 씁니다.
-
-## benchmark-&lt;run-id&gt;.json
-
-`BenchmarkResult` 배열입니다. 시나리오 하나가 원소 하나입니다.
-
-```json
-{
-  "database": "qdrant",
-  "indexType": "hnsw",
-  "targetRecall": 0.95,
-  "actualRecall": 0.957,
-  "comparisonRecall": 0.952222,
-  "recallTolerance": 0.01,
-  "targetMet": true,
-  "recallSelection": "WITHIN_TOLERANCE",
-  "tuningRecall": 0.952222,
-  "averageLatencyMs": 3.602493,
-  "p50LatencyMs": 3.3706,
-  "p95LatencyMs": 5.5466,
-  "p99LatencyMs": 7.179,
-  "qps": 2751.515,
-  "filtered":   {"queryExecutions": 150,  "recall": 1.0, "averageMs": 3.741035, "p50Ms": 3.5421, "p95Ms": 5.4356, "p99Ms": 6.794},
-  "unfiltered": {"queryExecutions": 1350, "recall": 0.952222, "averageMs": 3.587099, "p50Ms": 3.3464, "p95Ms": 5.6153, "p99Ms": 7.28},
-  "averageCpuPercent": 0.15,
-  "peakMemoryBytes": 106220748,
-  "diskWriteBytes": 0,
-  "indexSizeBytes": -1,
-  "indexBuildTimeMs": 0,
-  "upsertTimeMs": 0,
-  "vectorCount": 10000,
-  "queryExecutions": 1500,
-  "concurrency": 10,
-  "topK": 10,
-  "warmupIterations": 1,
-  "measurementIterations": 5,
-  "indexParameters": {...},
-  "searchParameters": {"hnsw_ef": 20},
-  "environment": {...},
-  "measuredAt": "2026-09-11T05:11:24.375Z"
-}
-```
-
-## 필드 정의
-
-### Recall
+## 원시 행 핵심 필드
 
 | 필드 | 의미 |
 |---|---|
-| `targetRecall` | 목표 |
-| `actualRecall` | 본 측정 5회 평균 (전체 질의) |
-| `comparisonRecall` | 주 비교 모집단인 무필터 질의의 본 측정 Recall. 무필터가 없으면 전체 Recall |
-| `recallTolerance` | 허용오차 (기본 0.01) |
-| `targetMet` | `comparisonRecall`이 허용 범위를 충족했는지 |
-| `recallSelection` | `WITHIN_TOLERANCE` / `CLOSEST_AVAILABLE` / `EXPLICIT_PARAMETERS` |
-| `tuningRecall` | 무필터 튜닝 단계에서 그 후보가 기록한 Recall. 명시 파라미터면 null |
+| `testId`, `runNumber` | T01~T28와 전체 재구축 회차 |
+| `database`, `engine`, `indexType` | 실제 어댑터 식별자 |
+| `targetRecall` | 0.90 또는 0.95 |
+| `actualRecall` | evaluation 전체(필터 포함) Recall |
+| `comparisonRecall` | evaluation 무필터 Recall. ANN 주 비교값 |
+| `recallTolerance` | 기본 0.01 |
+| `targetMet` | evaluation comparisonRecall이 목표 ±허용범위인지 |
+| `calibrationSelection` | `WITHIN_TOLERANCE`, `CLOSEST_AVAILABLE`, `EXPLICIT_PARAMETERS` |
+| `calibrationRecall` | 선택 당시 calibration 무필터 Recall |
+| `searchParameters` | 실제 ef/probes/nprobe/searchProbe/nprobes/candidate_k |
+| `filtered`, `unfiltered` | 모집단별 query count, Recall, 평균, p50/p95/p99 |
+| `qps` | evaluation search 완료 시간만 사용한 처리량 |
+| `averageCpuPercent`, `peakCpuPercent` | 대상 컨테이너 합산 CPU 평균/최대 |
+| `averageMemoryBytes`, `peakMemoryBytes` | 대상 컨테이너 합산 RAM 평균/최대 |
+| `indexSizeBytes` | 제품에서 분리 측정 가능한 인덱스 크기. 미지원 -1 |
+| `indexBuildTimeMs` | drop/create부터 적재·flush/refresh·ready까지 |
+| `upsertTimeMs` | 적재 API 구간 |
+| `stabilityDiagnostics` | Milvus serial/concurrent 표본과 전후 index/load/segment 상태 |
+| `environment` | 입력 SHA-256, query split SHA-256, Docker 제한, 실행 환경 |
 
-### 지연시간
+QPS 타이머 종료 후 Recall을 계산하므로 QPS와 latency는 같은 순수 검색 workload를 설명합니다.
 
-| 필드 | 의미 |
-|---|---|
-| `averageLatencyMs`, `p50` / `p95` / `p99` | **전체 질의 합산.** 필터 질의가 소수면 p95·p99는 필터 비용을 반영 |
-| `filtered.*` | 필터가 있는 질의만 |
-| `unfiltered.*` | 필터가 없는 질의만 |
-
-percentile은 nearest-rank 방식입니다.
-
-```java
-int index = Math.max(0, (int) Math.ceil(percentile * sorted.size()) - 1);
-```
-
-**ANN 성능 비교에는 `unfiltered.*`를 씁니다.**
-이유는 [../03-benchmark-design/metrics.md](../03-benchmark-design/metrics.md)에 있습니다.
-
-### 자원
-
-| 필드 | 의미 |
-|---|---|
-| `qps` | 측정 요청 수 ÷ 측정 구간 소요 시간 |
-| `averageCpuPercent` | 대상 컨테이너 CPU 평균 합계. Milvus는 3개 합산 |
-| `peakMemoryBytes` | 같은 대상 메모리 합계의 최대값 |
-| `diskWriteBytes` | 검색 측정 중 Block I/O write 증가량. 볼륨 전체 크기와 다름 |
-| `indexSizeBytes` | DB가 제공하는 범위에서만. 미지원 `-1` |
-| `indexBuildTimeMs` | drop/create + 적재 + 비동기 인덱싱 완료까지 (첫 시나리오만) |
-| `upsertTimeMs` | 위 시간에 포함되는 적재 구간 (첫 시나리오만) |
-
-### environment
-
-```json
-{
-  "os": "...", "cpu": "...", "availableProcessors": 16, "physicalMemoryBytes": ...,
-  "javaVersion": "21...", "springBootVersion": "4.1.1", "dockerServerVersion": "29.7.2",
-  "declaredVectorDbBudget": {"cpuCores": 4.0, "memoryBytes": 8589934592},
-  "containerLimits": {"vector-qdrant": "cpuNano=4000000000,memoryBytes=8589934592,memorySwapBytes=8589934592"},
-  "metric": "COSINE",
-  "documentVectorsSha256": "cc23f0...",
-  "queryDefinitionsSha256": "...",
-  "queryVectorsSha256": "d06cc8...",
-  "sourceOfTruth": {
-    "datasetSha256": "cc23f0...", "documentCount": 200,
-    "chunkCount": 10000, "synchronizedNow": false
-  }
-}
-```
-
-이 값이 다르면 서로 다른 실험입니다. 한 표에 섞지 않습니다.
-
-## vector-db-result.csv
-
-42개 컬럼입니다.
+## CSV 컬럼
 
 ```text
-database,index,target_recall,actual_recall,comparison_recall,recall_tolerance,target_met,recall_selection,tuning_recall,
+test_id,run_number,database,engine,index,target_recall,actual_recall,comparison_recall,
+recall_tolerance,target_met,calibration_selection,calibration_recall,
 average_ms,p50_ms,p95_ms,p99_ms,qps,
 filtered_queries,filtered_recall,filtered_average_ms,filtered_p50_ms,filtered_p95_ms,filtered_p99_ms,
 unfiltered_queries,unfiltered_recall,unfiltered_average_ms,unfiltered_p50_ms,unfiltered_p95_ms,unfiltered_p99_ms,
-cpu_percent,peak_memory_bytes,disk_write_bytes,index_size_bytes,time_to_index_ready_ms,upsert_ms,
-vector_count,query_executions,concurrency,top_k,warmup_iterations,measurement_iterations,
-index_parameters,search_parameters,environment,measured_at
+cpu_average_percent,cpu_max_percent,ram_average_bytes,ram_max_bytes,disk_write_bytes,
+index_size_bytes,time_to_index_ready_ms,upsert_ms,vector_count,query_executions,
+concurrency,top_k,warmup_iterations,measurement_iterations,
+stability_verified,stability_diagnostics,index_parameters,search_parameters,environment,measured_at
 ```
 
-- 같은 디렉터리에 실행할 때마다 **append**됩니다.
-- 구간에 질의가 없으면 `*_queries`는 0, `*_recall`은 빈 값입니다.
-- `index_parameters` / `search_parameters` / `environment`는 JSON 문자열을 CSV 인용한 값입니다.
+JSON 객체는 CSV에서 인용된 JSON 문자열입니다.
 
-### 스키마 호환성
+## 집계 행
 
-`ResultWriter`가 기존 CSV의 헤더를 검사합니다.
+`summary/vector-db-summary.csv`는 test ID별로 다음을 계산합니다.
 
-```java
-throw new IllegalStateException("Existing CSV schema is incompatible; use a new benchmark result directory: " + csv);
-```
+- completed runs
+- comparison Recall average/min/max
+- median unfiltered p95와 QPS
+- median CPU/RAM/index size/index build time
+- `within_target_tolerance`: Recall 평균이 해당 목표 ±0.01인지
+- `passes_recall_floor`: Recall 평균이 의사결정 하한(기본 0.95) 이상인지
+- `rebuild_recall_range`: 재구축 회차 간 comparison Recall max-min
+- `stability_verified`: 모든 회차의 같은-index drift 진단과, 필수 대상의 rebuild Recall range ≤0.05를 모두 통과했는지
+- `eligible`: 반복 완료와 Recall/p95/RAM/stability 규칙을 모두 통과했는지
 
-**컬럼이 바뀌면 기존 디렉터리에 이어 쓸 수 없습니다.** 새 디렉터리를 지정합니다.
-
-## charts/recall-latency-*.svg
-
-x축은 **unfiltered p95**, y축은 **comparison Recall(unfiltered)**입니다.
-합산 p95는 필터 비용을 반영하므로 차트 축으로 쓰지 않습니다.
-구간 데이터가 없는 예전 결과는 x축을 합산 p95, y축을 전체 `actualRecall`로 대체합니다.
-
-같은 디렉터리의 모든 `raw/benchmark-*.json`을 다시 읽어 재생성하므로
-다섯 DB를 순서대로 실행하면 마지막 차트에 전부 들어갑니다.
-
-## 관련 문서
-
-- [../03-benchmark-design/metrics.md](../03-benchmark-design/metrics.md)
-- [code-architecture.md](code-architecture.md)
+단일 실행 행의 `targetMet`과 반복 집계의 `within_target_tolerance`을 혼동하지 않습니다.

@@ -17,10 +17,10 @@ import java.util.Map;
 import java.util.Locale;
 
 public class ResultWriter {
-    private static final String CSV_HEADER = "database,index,target_recall,actual_recall,comparison_recall,recall_tolerance,target_met,recall_selection,tuning_recall,average_ms,p50_ms,p95_ms,p99_ms,qps,"
+    private static final String CSV_HEADER = "test_id,run_number,database,engine,index,target_recall,actual_recall,comparison_recall,recall_tolerance,target_met,calibration_selection,calibration_recall,average_ms,p50_ms,p95_ms,p99_ms,qps,"
             + "filtered_queries,filtered_recall,filtered_average_ms,filtered_p50_ms,filtered_p95_ms,filtered_p99_ms,"
             + "unfiltered_queries,unfiltered_recall,unfiltered_average_ms,unfiltered_p50_ms,unfiltered_p95_ms,unfiltered_p99_ms,"
-            + "cpu_percent,peak_memory_bytes,disk_write_bytes,index_size_bytes,time_to_index_ready_ms,upsert_ms,vector_count,query_executions,concurrency,top_k,warmup_iterations,measurement_iterations,index_parameters,search_parameters,environment,measured_at\n";
+            + "cpu_average_percent,cpu_max_percent,ram_average_bytes,ram_max_bytes,disk_write_bytes,index_size_bytes,time_to_index_ready_ms,upsert_ms,vector_count,query_executions,concurrency,top_k,warmup_iterations,measurement_iterations,stability_verified,stability_diagnostics,index_parameters,search_parameters,environment,measured_at\n";
     private final ObjectMapper objectMapper;
 
     public ResultWriter(ObjectMapper objectMapper) {
@@ -102,25 +102,60 @@ public class ResultWriter {
     }
 
     private String toCsv(BenchmarkResult result) {
-        return String.format(Locale.ROOT,
-                "%s,%s,%.6f,%.6f,%.6f,%.6f,%s,%s,%s,%.6f,%.6f,%.6f,%.6f,%.3f,%s,%s,%.3f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%s,%s,%s%n",
-                csv(result.database()), csv(result.indexType()), result.targetRecall(), result.actualRecall(),
-                result.comparisonRecall(), result.recallTolerance(), result.targetMet(),
-                csv(result.recallSelection()), csvNumber(result.tuningRecall()),
-                result.averageLatencyMs(), result.p50LatencyMs(), result.p95LatencyMs(), result.p99LatencyMs(), result.qps(),
-                csvSegment(result.filtered()), csvSegment(result.unfiltered()),
-                result.averageCpuPercent(), result.peakMemoryBytes(), result.diskWriteBytes(), result.indexSizeBytes(),
-                result.indexBuildTimeMs(), result.upsertTimeMs(), result.vectorCount(), result.queryExecutions(),
-                result.concurrency(), result.topK(), result.warmupIterations(), result.measurementIterations(),
-                csv(objectMapper.writeValueAsString(result.indexParameters())),
-                csv(objectMapper.writeValueAsString(result.searchParameters())),
-                csv(objectMapper.writeValueAsString(result.environment())), result.measuredAt());
+        List<String> cells = new ArrayList<>();
+        cells.add(csv(result.testId()));
+        cells.add(Integer.toString(result.runNumber()));
+        cells.add(csv(result.database()));
+        cells.add(csv(result.engine()));
+        cells.add(csv(result.indexType()));
+        cells.add(decimal(result.targetRecall(), 6));
+        cells.add(decimal(result.actualRecall(), 6));
+        cells.add(decimal(result.comparisonRecall(), 6));
+        cells.add(decimal(result.recallTolerance(), 6));
+        cells.add(Boolean.toString(result.targetMet()));
+        cells.add(csv(result.calibrationSelection()));
+        cells.add(csvNumber(result.calibrationRecall()));
+        cells.add(decimal(result.averageLatencyMs(), 6));
+        cells.add(decimal(result.p50LatencyMs(), 6));
+        cells.add(decimal(result.p95LatencyMs(), 6));
+        cells.add(decimal(result.p99LatencyMs(), 6));
+        cells.add(decimal(result.qps(), 3));
+        addSegment(cells, result.filtered());
+        addSegment(cells, result.unfiltered());
+        cells.add(decimal(result.averageCpuPercent(), 3));
+        cells.add(decimal(result.peakCpuPercent(), 3));
+        cells.add(Long.toString(result.averageMemoryBytes()));
+        cells.add(Long.toString(result.peakMemoryBytes()));
+        cells.add(Long.toString(result.diskWriteBytes()));
+        cells.add(Long.toString(result.indexSizeBytes()));
+        cells.add(Long.toString(result.indexBuildTimeMs()));
+        cells.add(Long.toString(result.upsertTimeMs()));
+        cells.add(Integer.toString(result.vectorCount()));
+        cells.add(Integer.toString(result.queryExecutions()));
+        cells.add(Integer.toString(result.concurrency()));
+        cells.add(Integer.toString(result.topK()));
+        cells.add(Integer.toString(result.warmupIterations()));
+        cells.add(Integer.toString(result.measurementIterations()));
+        cells.add(Boolean.toString(result.stabilityDiagnostics().verified()));
+        cells.add(csv(objectMapper.writeValueAsString(result.stabilityDiagnostics())));
+        cells.add(csv(objectMapper.writeValueAsString(result.indexParameters())));
+        cells.add(csv(objectMapper.writeValueAsString(result.searchParameters())));
+        cells.add(csv(objectMapper.writeValueAsString(result.environment())));
+        cells.add(result.measuredAt().toString());
+        return String.join(",", cells) + System.lineSeparator();
     }
 
-    private String csvSegment(QuerySegment segment) {
-        return String.format(Locale.ROOT, "%d,%s,%.6f,%.6f,%.6f,%.6f",
-                segment.queryExecutions(), csvNumber(segment.recall()),
-                segment.averageMs(), segment.p50Ms(), segment.p95Ms(), segment.p99Ms());
+    private void addSegment(List<String> cells, QuerySegment segment) {
+        cells.add(Integer.toString(segment.queryExecutions()));
+        cells.add(csvNumber(segment.recall()));
+        cells.add(decimal(segment.averageMs(), 6));
+        cells.add(decimal(segment.p50Ms(), 6));
+        cells.add(decimal(segment.p95Ms(), 6));
+        cells.add(decimal(segment.p99Ms(), 6));
+    }
+
+    private String decimal(double value, int scale) {
+        return String.format(Locale.ROOT, "%." + scale + "f", value);
     }
 
     private String csvNumber(Double value) {

@@ -1,5 +1,8 @@
 # Benchmark Results — 비교 모집단 수정 후 재실행 (2026-09-11)
 
+> **역사 자료:** 이 결과는 단일 재구축이며 같은 query로 튜닝·평가했습니다. 현재 하네스의
+> calibration/evaluation split과 반복 집계 결과가 아니므로 제품 선정 근거에서 제외합니다.
+
 > **상태: 재실행 완료.** Qdrant payload index, 필터/무필터 percentile 분리,
 > 목표 Recall의 비교 모집단, PostgreSQL Source of Truth 동기화를 반영한 결과다.
 > 단일 재구축 1회이므로 최종 제품 선정 전 반복 실행이 필요하다.

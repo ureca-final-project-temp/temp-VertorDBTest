@@ -4,15 +4,18 @@ import java.time.Instant;
 import java.util.Map;
 
 public record BenchmarkResult(
+        String testId,
+        int runNumber,
         String database,
+        String engine,
         String indexType,
         double targetRecall,
         double actualRecall,
         Double comparisonRecall,
         double recallTolerance,
         boolean targetMet,
-        String recallSelection,
-        Double tuningRecall,
+        String calibrationSelection,
+        Double calibrationRecall,
         double averageLatencyMs,
         double p50LatencyMs,
         double p95LatencyMs,
@@ -21,6 +24,8 @@ public record BenchmarkResult(
         QuerySegment filtered,
         QuerySegment unfiltered,
         double averageCpuPercent,
+        double peakCpuPercent,
+        long averageMemoryBytes,
         long peakMemoryBytes,
         long diskWriteBytes,
         long indexSizeBytes,
@@ -32,6 +37,7 @@ public record BenchmarkResult(
         int topK,
         int warmupIterations,
         int measurementIterations,
+        StabilityDiagnostics stabilityDiagnostics,
         Map<String, Object> indexParameters,
         Map<String, Object> searchParameters,
         Map<String, Object> environment,
@@ -47,6 +53,9 @@ public record BenchmarkResult(
         if (!Double.isFinite(comparisonRecall)) {
             throw new IllegalArgumentException("comparisonRecall must be finite");
         }
+        stabilityDiagnostics = stabilityDiagnostics == null
+                ? StabilityDiagnostics.notRequired()
+                : stabilityDiagnostics;
         indexParameters = indexParameters == null ? Map.of() : Map.copyOf(indexParameters);
         searchParameters = searchParameters == null ? Map.of() : Map.copyOf(searchParameters);
         environment = environment == null ? Map.of() : Map.copyOf(environment);

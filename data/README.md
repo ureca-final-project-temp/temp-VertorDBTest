@@ -52,9 +52,15 @@ DB benchmark에서는 embedding 생성 시간을 latency에 포함하지 않는�
 
 `ANN Recall@10 = |Exact Top-10 ∩ ANN Top-10| / 10`
 
-DB 간 주 비교 Target Recall@10은 0.80 / 0.90 / 0.95이며 허용 범위는 각 목표의 ±0.01이다.
+현재 T01~T28 주 비교 Target Recall@10은 0.90 / 0.95이며 허용 범위는 각 목표의 ±0.01이다.
 해당 범위에 드는 검색 설정이 없으면 후보 중 목표에 가장 가까운 실제 Recall을 사용하고
-`CLOSEST_AVAILABLE`로 표시한다. 0.70 / 0.99는 필요할 때만 보조 실험으로 측정한다.
+`CLOSEST_AVAILABLE`로 표시한다. 과거 0.80과 보조 0.70 / 0.99는 현재 28-case 표에 섞지 않는다.
+
+300개 query는 calibration 100 / evaluation 200으로 고정 분할한다. 파라미터 선택에는
+calibration만, 최종 Recall·latency·QPS에는 evaluation만 사용한다.
+
+`workloads/filter-selectivity/`는 `generateFilterSelectivityWorkloads`가 만드는 파생 입력이다.
+embedding은 바꾸지 않고 metadata만 1%/10%/50% cohort로 확장한다.
 
 ### 2. 의미 검색 품질 확인 (선택)
 `qrels.tsv`를 사용해 실제 target topic 문서가 검색됐는지 별도로 평가할 수 있다.
@@ -64,3 +70,4 @@ DB 간 주 비교 Target Recall@10은 0.80 / 0.90 / 0.95이며 허용 범위는 
 
 이 데이터는 재현 가능한 DB 비교용 합성 데이터다.
 실제 서비스 선정 직전에는 실제 서비스 문서/질의 분포로 동일 benchmark를 한 번 더 수행하는 것이 적절하다.
+`run-real-workload-validation.ps1`은 문서 또는 query에서 `synthetic:true`를 발견하면 실행을 거부한다.
