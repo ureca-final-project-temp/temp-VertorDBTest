@@ -4,6 +4,7 @@ import com.myapp.infrastructure.vector.http.JsonHttpClient;
 import com.myapp.infrastructure.vector.http.VectorStoreHttpException;
 import com.myapp.port.VectorIndexManager;
 
+import java.util.List;
 import java.util.Map;
 import java.time.Duration;
 import tools.jackson.databind.JsonNode;
@@ -28,6 +29,18 @@ public class QdrantIndexManager implements VectorIndexManager {
                         "full_scan_threshold", properties.getFullScanThreshold()),
                 "optimizers_config", Map.of("indexing_threshold", properties.getIndexingThreshold())
         ));
+        createPayloadIndexes();
+    }
+
+    /**
+     * Qdrant only uses filtered HNSW when the filtered field carries a payload index.
+     * Without one it evaluates the filter by scanning every point, which makes filtered
+     * queries independent of hnsw_ef and dominates the latency tail.
+     */
+    private void createPayloadIndexes() {
+        properties.getPayloadIndexFields().forEach((key, schema) -> client.put(
+                "/collections/" + properties.getCollection() + "/index?wait=true",
+                Map.of("field_name", payloadField(key), "field_schema", schema)));
     }
 
     @Override
@@ -49,11 +62,13 @@ public class QdrantIndexManager implements VectorIndexManager {
         }
         long deadline = System.nanoTime() + timeout.toNanos();
         while (System.nanoTime() < deadline) {
-            JsonNode response = client.get("/collections/" + properties.getCollection());
-            JsonNode result = response.get("result");
+            JsonNode result = client.get("/collections/" + properties.getCollection()).get("result");
             long indexed = result == null || result.get("indexed_vectors_count") == null ? 0 : result.get("indexed_vectors_count").asLong();
             String status = result == null || result.get("status") == null ? "" : result.get("status").asString();
-            if (indexed >= expectedVectorCount && "green".equalsIgnoreCase(status)) return;
+            if (indexed >= expectedVectorCount && "green".equalsIgnoreCase(status)) {
+                requirePayloadIndexes(result);
+                return;
+            }
             try {
                 Thread.sleep(250);
             } catch (InterruptedException exception) {
@@ -64,6 +79,23 @@ public class QdrantIndexManager implements VectorIndexManager {
         throw new IllegalStateException("Qdrant HNSW index did not become ready within " + timeout);
     }
 
+    /** A missing payload index silently degrades filtered search to a full scan, so fail instead of measuring it. */
+    private void requirePayloadIndexes(JsonNode collection) {
+        JsonNode schema = collection.get("payload_schema");
+        List<String> missing = properties.getPayloadIndexFields().keySet().stream()
+                .map(this::payloadField)
+                .filter(field -> schema == null || schema.get(field) == null)
+                .toList();
+        if (!missing.isEmpty()) {
+            throw new IllegalStateException("Qdrant payload index is missing for " + missing
+                    + "; filtered search would fall back to a full scan");
+        }
+    }
+
+    private String payloadField(String metadataKey) {
+        return "metadata." + metadataKey;
+    }
+
     @Override
     public Map<String, Object> indexParameters() {
         return Map.of(
@@ -72,7 +104,8 @@ public class QdrantIndexManager implements VectorIndexManager {
                 "full_scan_threshold_kb", properties.getFullScanThreshold(),
                 "indexing_threshold_kb", properties.getIndexingThreshold(),
                 "metric", properties.getMetric().name(),
-                "dimension", properties.getDimension()
+                "dimension", properties.getDimension(),
+                "payload_index_fields", properties.getPayloadIndexFields()
         );
     }
 

@@ -17,7 +17,10 @@ import java.util.Map;
 import java.util.Locale;
 
 public class ResultWriter {
-    private static final String CSV_HEADER = "database,index,target_recall,actual_recall,recall_tolerance,target_met,recall_selection,tuning_recall,average_ms,p50_ms,p95_ms,p99_ms,qps,cpu_percent,peak_memory_bytes,disk_write_bytes,index_size_bytes,time_to_index_ready_ms,upsert_ms,vector_count,query_executions,concurrency,top_k,warmup_iterations,measurement_iterations,index_parameters,search_parameters,environment,measured_at\n";
+    private static final String CSV_HEADER = "database,index,target_recall,actual_recall,recall_tolerance,target_met,recall_selection,tuning_recall,average_ms,p50_ms,p95_ms,p99_ms,qps,"
+            + "filtered_queries,filtered_recall,filtered_average_ms,filtered_p50_ms,filtered_p95_ms,filtered_p99_ms,"
+            + "unfiltered_queries,unfiltered_recall,unfiltered_average_ms,unfiltered_p50_ms,unfiltered_p95_ms,unfiltered_p99_ms,"
+            + "cpu_percent,peak_memory_bytes,disk_write_bytes,index_size_bytes,time_to_index_ready_ms,upsert_ms,vector_count,query_executions,concurrency,top_k,warmup_iterations,measurement_iterations,index_parameters,search_parameters,environment,measured_at\n";
     private final ObjectMapper objectMapper;
 
     public ResultWriter(ObjectMapper objectMapper) {
@@ -100,16 +103,23 @@ public class ResultWriter {
 
     private String toCsv(BenchmarkResult result) {
         return String.format(Locale.ROOT,
-                "%s,%s,%.6f,%.6f,%.6f,%s,%s,%s,%.6f,%.6f,%.6f,%.6f,%.3f,%.3f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%s,%s,%s%n",
+                "%s,%s,%.6f,%.6f,%.6f,%s,%s,%s,%.6f,%.6f,%.6f,%.6f,%.3f,%s,%s,%.3f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%s,%s,%s%n",
                 csv(result.database()), csv(result.indexType()), result.targetRecall(), result.actualRecall(),
                 result.recallTolerance(), result.targetMet(), csv(result.recallSelection()), csvNumber(result.tuningRecall()),
                 result.averageLatencyMs(), result.p50LatencyMs(), result.p95LatencyMs(), result.p99LatencyMs(), result.qps(),
+                csvSegment(result.filtered()), csvSegment(result.unfiltered()),
                 result.averageCpuPercent(), result.peakMemoryBytes(), result.diskWriteBytes(), result.indexSizeBytes(),
                 result.indexBuildTimeMs(), result.upsertTimeMs(), result.vectorCount(), result.queryExecutions(),
                 result.concurrency(), result.topK(), result.warmupIterations(), result.measurementIterations(),
                 csv(objectMapper.writeValueAsString(result.indexParameters())),
                 csv(objectMapper.writeValueAsString(result.searchParameters())),
                 csv(objectMapper.writeValueAsString(result.environment())), result.measuredAt());
+    }
+
+    private String csvSegment(QuerySegment segment) {
+        return String.format(Locale.ROOT, "%d,%s,%.6f,%.6f,%.6f,%.6f",
+                segment.queryExecutions(), csvNumber(segment.recall()),
+                segment.averageMs(), segment.p50Ms(), segment.p95Ms(), segment.p99Ms());
     }
 
     private String csvNumber(Double value) {
@@ -121,20 +131,29 @@ public class ResultWriter {
         return '"' + value.replace("\"", "\"\"") + '"';
     }
 
+    /**
+     * Filtered queries sit in the tail of the combined distribution, so the combined p95 reports
+     * filter cost rather than ANN tail behaviour. Plot the unfiltered tail whenever the run recorded it.
+     */
+    private double chartLatencyMs(BenchmarkResult result) {
+        return result.unfiltered().queryExecutions() > 0 ? result.unfiltered().p95Ms() : result.p95LatencyMs();
+    }
+
     private String scatterPlot(List<BenchmarkResult> results) {
-        double maxLatency = Math.max(1, results.stream().mapToDouble(BenchmarkResult::p95LatencyMs).max().orElse(1));
+        double maxLatency = Math.max(1, results.stream().mapToDouble(this::chartLatencyMs).max().orElse(1));
         StringBuilder circles = new StringBuilder();
         String[] colors = {"#2563eb", "#dc2626", "#059669", "#7c3aed", "#ea580c"};
         Map<String, String> databaseColors = new LinkedHashMap<>();
         for (int i = 0; i < results.size(); i++) {
             BenchmarkResult result = results.get(i);
-            double x = 70 + (result.p95LatencyMs() / maxLatency) * 680;
+            double latency = chartLatencyMs(result);
+            double x = 70 + (latency / maxLatency) * 680;
             double y = 350 - result.actualRecall() * 300;
             String color = databaseColors.computeIfAbsent(result.database(),
                     ignored -> colors[databaseColors.size() % colors.length]);
             circles.append(String.format(Locale.ROOT,
                     "<circle cx=\"%.2f\" cy=\"%.2f\" r=\"6\" fill=\"%s\"><title>%s / target %.2f / p95 %.3f ms / recall %.4f</title></circle>%n",
-                    x, y, color, escapeXml(result.database()), result.targetRecall(), result.p95LatencyMs(), result.actualRecall()));
+                    x, y, color, escapeXml(result.database()), result.targetRecall(), latency, result.actualRecall()));
         }
         StringBuilder legend = new StringBuilder();
         int legendX = 90;
@@ -150,7 +169,7 @@ public class ResultWriter {
                   <rect width="800" height="420" fill="white"/>
                   <line x1="70" y1="350" x2="760" y2="350" stroke="#111827"/>
                   <line x1="70" y1="40" x2="70" y2="350" stroke="#111827"/>
-                  <text x="390" y="400" font-family="sans-serif" font-size="14">p95 latency (ms)</text>
+                  <text x="330" y="400" font-family="sans-serif" font-size="14">unfiltered p95 latency (ms)</text>
                   <text x="18" y="210" transform="rotate(-90 18 210)" font-family="sans-serif" font-size="14">Recall@K</text>
                   <text x="70" y="370" font-family="sans-serif" font-size="11">0</text>
                   <text x="720" y="370" font-family="sans-serif" font-size="11">%.2f</text>

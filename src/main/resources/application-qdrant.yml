@@ -18,5 +18,12 @@ vector:
     default-ef-search: ${HNSW_EF_SEARCH:100}
     full-scan-threshold: ${QDRANT_FULL_SCAN_THRESHOLD:10}
     indexing-threshold: ${QDRANT_INDEXING_THRESHOLD:10}
+    payload-index-fields:
+      tenant: keyword
+      tenant_id: keyword
+      status: keyword
+      access_level: keyword
+      language: keyword
+      category: keyword
 
 benchmark.container-names: [vector-qdrant]

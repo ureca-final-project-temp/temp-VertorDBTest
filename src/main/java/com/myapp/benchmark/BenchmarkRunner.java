@@ -116,27 +116,35 @@ public class BenchmarkRunner {
         }
 
         LatencyCollector latency = new LatencyCollector();
-        List<Callable<Double>> tasks = new ArrayList<>();
+        List<Callable<QueryOutcome>> tasks = new ArrayList<>();
         for (int pass = 0; pass < scenario.measurementIterations(); pass++) {
             for (BenchmarkQuery query : queries) {
+                boolean filtered = !query.filter().isEmpty();
                 tasks.add(() -> {
                     VectorSearchRequest request = request(query, scenario, effectiveParameters);
                     long started = System.nanoTime();
                     List<VectorSearchResult> approximate = store.search(request);
-                    latency.record(System.nanoTime() - started);
-                    return recallCalculator.recallAtK(groundTruth.get(query.queryId()), approximate, scenario.topK());
+                    latency.record(System.nanoTime() - started, filtered);
+                    return new QueryOutcome(filtered,
+                            recallCalculator.recallAtK(groundTruth.get(query.queryId()), approximate, scenario.topK()));
                 });
             }
         }
 
         List<Double> recallValues = new ArrayList<>(tasks.size());
+        List<Double> filteredRecalls = new ArrayList<>();
+        List<Double> unfilteredRecalls = new ArrayList<>();
         long benchmarkStarted;
         ResourceCollector.Usage resourceUsage;
         try (ResourceCollector.Measurement resources = resourceCollector.start(properties.getContainerNames());
              ExecutorService executor = Executors.newFixedThreadPool(scenario.concurrency())) {
             benchmarkStarted = System.nanoTime();
-            List<Future<Double>> futures = executor.invokeAll(tasks);
-            for (Future<Double> future : futures) recallValues.add(future.get());
+            List<Future<QueryOutcome>> futures = executor.invokeAll(tasks);
+            for (Future<QueryOutcome> future : futures) {
+                QueryOutcome outcome = future.get();
+                recallValues.add(outcome.recall());
+                (outcome.filtered() ? filteredRecalls : unfilteredRecalls).add(outcome.recall());
+            }
             long elapsed = System.nanoTime() - benchmarkStarted;
             resourceUsage = resources.usage();
             LatencyCollector.Statistics stats = latency.statistics();
@@ -149,6 +157,8 @@ public class BenchmarkRunner {
                     RecallTargetSelector.withinTolerance(recall, scenario.targetRecall(), recallTolerance),
                     tuning.strategy(), tuning.tuningRecall(),
                     stats.averageMs(), stats.p50Ms(), stats.p95Ms(), stats.p99Ms(), qps,
+                    QuerySegment.of(latency.filteredStatistics(), filteredRecalls),
+                    QuerySegment.of(latency.unfilteredStatistics(), unfilteredRecalls),
                     resourceUsage.averageCpuPercent(), resourceUsage.peakMemoryBytes(), resourceUsage.diskWriteBytes(),
                     indexManager.indexSizeBytes(), indexBuildTimeMs, upsertTimeMs, documents.size(), tasks.size(),
                     scenario.concurrency(), scenario.topK(), scenario.warmupIterations(), scenario.measurementIterations(),
@@ -320,6 +330,9 @@ public class BenchmarkRunner {
     }
 
     private record TuningSelection(Map<String, Object> parameters, Double tuningRecall, String strategy) {
+    }
+
+    private record QueryOutcome(boolean filtered, double recall) {
     }
 
     private record TuningProfile(int topK, int concurrency, int warmupIterations, int measurementIterations) {

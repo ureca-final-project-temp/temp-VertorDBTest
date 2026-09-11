@@ -158,9 +158,16 @@ try {
                 -ContentType 'application/json' -Body $body -TimeoutSec 3600
             $response | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath `
                 (Join-Path $resolvedResultDirectory "api-response-$profile.json") -Encoding utf8
-            $response.results | Select-Object database, targetRecall, actualRecall, recallTolerance, targetMet,
-                recallSelection, tuningRecall, p95LatencyMs, qps,
-                averageCpuPercent, peakMemoryBytes, indexSizeBytes, searchParameters | Format-Table -AutoSize
+            # Filtered and unfiltered queries are shown apart: with a filtered minority the
+            # combined p95 reports filter cost, not ANN tail latency.
+            $response.results | Select-Object database, targetRecall, actualRecall, targetMet,
+                recallSelection, tuningRecall,
+                @{ Name = 'unfilteredP95Ms'; Expression = { $_.unfiltered.p95Ms } },
+                @{ Name = 'unfilteredRecall'; Expression = { $_.unfiltered.recall } },
+                @{ Name = 'filteredP95Ms'; Expression = { $_.filtered.p95Ms } },
+                @{ Name = 'filteredRecall'; Expression = { $_.filtered.recall } },
+                @{ Name = 'combinedP95Ms'; Expression = { $_.p95LatencyMs } },
+                qps, averageCpuPercent, peakMemoryBytes, indexSizeBytes, searchParameters | Format-Table -AutoSize
         } finally {
             if ($application -and -not $application.HasExited) {
                 Stop-Process -Id $application.Id

@@ -1,6 +1,8 @@
-# Vector DB 선정 가이드
+# Decision Guide
 
 이 문서는 제품 홍보표가 아니라 1차 의사결정용 체크리스트다. 최종 선택은 반드시 이 저장소의 고정 데이터·고정 Recall 실험 결과로 결정한다.
+
+측정 수치는 [benchmark-results.md](benchmark-results.md), 그 수치의 유효성 검토는 [analysis.md](analysis.md)에 있다.
 
 | 항목 | pgvector | Qdrant | Weaviate | Milvus | OpenSearch |
 |---|---|---|---|---|---|
@@ -25,7 +27,8 @@
 
 ## 프로젝트에서 추가로 검증할 것
 
-- Qdrant는 실제 필터 키에 payload index 및 tenant 설정을 적용한 별도 시나리오가 필요하다.
+- Qdrant payload index는 `vector.qdrant.payload-index-fields`로 적용했고 `awaitReady`가 존재를 검증한다. 남은 것은 tenant 전용 설정(`is_tenant`)과 shard key 시나리오다.
+- 필터 질의와 무필터 질의는 분리해 비교한다. 필터 질의가 소수면 합산 p95/p99는 ANN 꼬리가 아니라 필터 비용이 된다. 결과 파일의 `unfiltered_*`와 `filtered_*`를 각각 본다.
 - pgvector filtered ANN은 필터 선택도별 결과 부족 여부와 iterative scan 설정을 확인해야 한다.
 - Weaviate는 선언한 filter property와 실제 JSONL metadata type이 일치해야 한다.
 - Milvus는 flush와 `indexedRows` 완료 후에만 측정해야 한다. 본 구현은 이 장벽을 포함한다.

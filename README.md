@@ -1,203 +1,159 @@
-# Vector DB 비교 벤치마크
+# Vector DB Benchmark
 
-동일한 사전 생성 벡터와 질의를 pgvector, Qdrant, Weaviate, Milvus, OpenSearch에 넣고 HNSW의 Recall@K, p50/p95/p99, QPS, CPU, 메모리, 디스크 쓰기량을 비교하는 Spring Boot 프로젝트다. LLM 및 임베딩 생성 시간은 측정 구간에서 제외한다.
+Spring Boot 기반 RAG Retrieval 환경에서
+pgvector, Qdrant, Weaviate, Milvus, OpenSearch를 비교합니다.
 
-## 구현 범위
+## 결론 요약
 
-```text
-고정 JSONL 벡터 ──> VectorStore Port ──> DB별 Adapter
-        │                                  │
-        └─> Java Exact Search ──> Ground Truth
-                                      │
-고정 Query Set ────────────────────────┴─> Recall/Latency/QPS/Resource
-                                               │
-                                               └─> JSON + CSV + SVG
-```
+본 실험은 동일한 BGE-M3 embedding, 동일 Dataset, 동일 Query Set,
+동일 Top-K 및 동일 Resource 제한 조건에서
+각 Vector DB의 ANN 검색 성능을 비교합니다.
 
-- `VectorStore`와 `VectorIndexManager` 뒤에 5개 DB 구현을 분리했다.
-- Exact Top-K는 DB 결과가 아니라 Java brute-force 계산으로 생성한다.
-- 빈 `searchParameters`는 실제 측정과 같은 동시성으로 후보를 평가해 목표 Recall을 만족하는 가장 작은 탐색값을 자동 선택한다.
-- 측정 타이머는 `VectorStore.search()` 호출만 감싼다. Controller, 임베딩, Ground Truth, 튜닝 시간은 제외한다.
-- PostgreSQL에는 원본 문서/청크용 Flyway 스키마와 Spring Data JDBC 저장 계층이 있다.
+Exact Search 결과를 Ground Truth로 사용하고,
+ANN Recall@10을 기준으로 검색 품질을 맞춘 뒤
+다음 지표를 비교합니다.
 
-## 고정 버전
+- p95 / p99 Latency
+- QPS
+- CPU
+- RAM
+- Index Build Time
+- Disk Usage
 
-| 구성 | 버전 |
-|---|---:|
-| Java | 21 |
-| Spring Boot | 4.1.1 |
-| PostgreSQL / pgvector | PostgreSQL 17 / pgvector 0.8.6 |
-| Qdrant | 1.19.0 |
-| Weaviate | 1.39.3 |
-| Milvus | 3.0.1 |
-| OpenSearch | 3.8.0 |
+최종 평가는 단순히 "가장 빠른 DB"를 선정하는 것이 아니라,
 
-이미지 태그는 `docker-compose.yml`의 환경변수로 바꿀 수 있다. 비교 실행 중에는 버전을 바꾸지 않는다.
+> 동일한 검색 품질에서 어떤 Vector DB가
+> 더 낮은 지연시간과 적은 자원으로 검색을 수행하는가
 
-## 입력 파일
+를 기준으로 합니다.
 
-실제 데이터의 BGE-M3 dense dimension은 [data/manifest.json](data/manifest.json)의 `1024`다. 원본 10,000개 문서와 300개 질의를 로컬 Ollama의 `bge-m3:latest`로 임베딩했으며 생성 조건과 SHA-256은 [data/embeddings/embedding-manifest.json](data/embeddings/embedding-manifest.json)에 고정돼 있다.
+### 최종 결과
 
-```powershell
-.\gradlew.bat generateEmbeddings
-```
+> 아직 실험 진행 중
 
-생성기는 기본 128건 배치, transient 재시도, 실패 배치 자동 분할, checkpoint 재개, 전체 차원·유한값·zero vector 검증을 수행한다. 완료된 출력이 있으면 해시와 레코드 수를 검증하고 재생성하지 않는다. 의도적으로 다시 만들 때만 `-PoverwriteEmbeddings=true`를 사용한다. 이 옵션은 기존 생성 벡터를 교체하므로 모델이나 원본을 바꾼 경우에만 써야 한다.
+실험 완료 후 다음 형식으로 요약합니다.
 
-`document-vectors.jsonl`:
+| DB | Recall@10 | p95 | QPS | RAM | 평가 |
+|---|---:|---:|---:|---:|---|
+| pgvector | TBD | TBD | TBD | TBD | TBD |
+| Qdrant | TBD | TBD | TBD | TBD | TBD |
+| Weaviate | TBD | TBD | TBD | TBD | TBD |
+| Milvus | TBD | TBD | TBD | TBD | TBD |
+| OpenSearch | TBD | TBD | TBD | TBD | TBD |
 
-```json
-{"id":"chunk-001","documentId":"doc-001","chunkId":"chunk-001","content":"...","embedding":[0.1,0.2],"metadata":{"tenant_id":"alpha","status":"active"}}
-```
+1차 실행은 완료했으나 측정 결함 두 건을 확인해 재실행 대기 중입니다.
+경위와 수정 내용은 [docs/07-results/analysis.md](docs/07-results/analysis.md)에 있습니다.
 
-`queries.jsonl`:
-
-```json
-{"queryId":"q-001","query":"...","filter":{"tenant_id":"alpha","status":"active"}}
-```
-
-`query-vectors.jsonl`:
-
-```json
-{"queryId":"q-001","embedding":[0.1,0.2]}
-```
-
-벡터 차원, 정규화 방식, distance metric을 모든 DB에서 반드시 같게 유지한다. 실험용 파일 기본 위치는 다음과 같다.
+## 실험 한눈에 보기
 
 ```text
-data/embeddings/document-vectors.jsonl
-data/embeddings/query-vectors.jsonl
-data/queries/queries.jsonl
+BGE-M3
+  → 1024-dimensional vector
+  → Same Dataset
+  → Same Query Vector
+  → Exact Top-K
+  → ANN Top-K
+  → Recall@10
+  → Latency / QPS / CPU / RAM 비교
 ```
 
-## 4차원 샘플로 빠르게 확인
+## 왜 비교하는가
 
-PowerShell 기준이다. `pgvector` 대신 `qdrant`, `weaviate`, `milvus`, `opensearch` 중 하나를 넣는다. 독립 Vector DB 프로필에서도 Source of Truth용 PostgreSQL이 함께 필요하다.
+RAG 서비스에서 Vector DB를 고를 때 흔히 보는 벤치마크는 세 가지 이유로 그대로 쓰기 어렵습니다.
+
+- **검색 품질이 다른 상태의 속도를 비교합니다.** ANN은 탐색 폭을 줄이면 항상 빨라지므로,
+  Recall을 맞추지 않은 latency 비교는 순위를 만들어낼 수 있습니다.
+- **자원 조건이 다릅니다.** CPU와 메모리 상한이 다르면 같은 지표를 나란히 둘 수 없습니다.
+- **embedding 조건이 다릅니다.** 모델과 차원이 다르면 인덱스 난이도 자체가 달라집니다.
+
+이 저장소는 세 가지를 모두 고정합니다.
+
+| 고정 대상 | 방법 |
+|---|---|
+| 검색 품질 | Exact Top-K를 Ground Truth로 계산하고, Recall@10이 목표 구간에 들도록 DB별 탐색 파라미터를 자동 조정 |
+| 자원 | 대상 합계 4 vCPU / 8 GiB, swap 금지. 측정 전 `docker inspect`로 실제 상한을 검증하고 다르면 중단 |
+| 입력 | 동일한 BGE-M3 1024차원 벡터 파일을 전 DB에 재사용하고 SHA-256으로 고정 |
+
+측정 구간은 `VectorStore.search()` 호출만 감쌉니다. LLM 및 embedding 생성 시간은 포함하지 않습니다.
+
+이 벤치마크가 답하지 않는 질문은 [docs/03-benchmark-design/limitations.md](docs/03-benchmark-design/limitations.md)에 있습니다.
+
+## 비교 대상
+
+| DB | 버전 | 인덱스 | 탐색 파라미터 | 접근 방식 |
+|---|---|---|---|---|
+| pgvector | PostgreSQL 17 / pgvector 0.8.6 | HNSW | `ef_search` | JDBC |
+| Qdrant | 1.19.0 | HNSW | `hnsw_ef` | REST query API |
+| Weaviate | 1.39.3 | HNSW | `ef` | GraphQL |
+| Milvus | 3.0.1 | HNSW | `ef` | REST v2 |
+| OpenSearch | 3.8.0 | Lucene HNSW | `ef_search` | REST |
+
+모든 DB가 HNSW를 사용하고 생성 파라미터는 `M=16`, `ef_construction=128`로 같습니다.
+거리 함수는 cosine, Top-K는 10입니다.
+
+제품별 설정과 주의점은 [docs/05-databases/](docs/05-databases/)를 봅니다.
+
+## Quick Start
+
+요구사항: Java 21, Docker 27+, PowerShell, 로컬 Ollama(`bge-m3:latest`)
+
+4차원 샘플 데이터로 연결·적재·검색·결과 저장까지 확인하는 경로입니다.
+Ollama 없이 바로 실행할 수 있습니다.
 
 ```powershell
-docker compose --profile qdrant up -d
+docker compose --profile qdrant up -d postgres qdrant
 
 $env:VECTOR_DIMENSION = "4"
 $env:DOCUMENT_VECTORS = "data/sample/documents-vectors.jsonl"
 $env:QUERY_DEFINITIONS = "data/sample/queries.jsonl"
 $env:QUERY_VECTORS = "data/sample/query-vectors.jsonl"
-$env:BENCHMARK_RESULT_DIR = "benchmark-result/qdrant"
+$env:BENCHMARK_RESULT_DIR = "benchmark-result/smoke"
 
 .\gradlew.bat bootRun --args="--spring.profiles.active=qdrant"
 ```
 
-다른 PowerShell 창에서 실행한다.
+다른 PowerShell 창에서 실행합니다.
 
 ```powershell
-$body = Get-Content -Raw data/sample/benchmark-request.json
 Invoke-RestMethod -Method Post `
   -Uri http://localhost:8080/api/benchmarks/run `
   -ContentType application/json `
-  -Body $body
+  -Body (Get-Content -Raw data/sample/benchmark-request.json)
 ```
 
-샘플은 연결·적재·검색·필터·결과 저장을 확인하는 smoke test일 뿐이다. 데이터가 너무 작고 4차원으로 인위적이므로 DB 성능 결론에 사용하면 안 된다.
-
-## 실제 벤치마크
-
-1. `embedding-manifest.json`의 모델 digest와 입력·출력 SHA-256을 확인한다.
-2. 비교 대상 하나만 시작한다: `docker compose --profile <db> up -d`.
-3. 해당 Spring 프로필을 시작하고 같은 요청을 보낸다.
-4. 앱과 DB의 캐시 조건을 통일한 뒤 다음 DB로 반복한다.
-5. 모든 실행에서 같은 CPU/RAM 제한, Top-K, warm-up, concurrency, 반복 횟수를 유지한다.
-
-제공한 본실험 시나리오는 Target Recall@10 `0.80 / 0.90 / 0.95`(각 `±0.01`), concurrency 10, warm-up 1회, 측정 5회이며 DB별 4,500건의 측정 요청을 만든다. 다섯 DB를 순서대로 실행하고 각 DB를 종료하려면 다음 명령을 사용한다.
+### 정상 동작 확인
 
 ```powershell
-.\gradlew.bat bootJar
-.\scripts\run-all-benchmarks.ps1
+Test-Path benchmark-result/smoke/csv/vector-db-result.csv
+# expected: True
 ```
 
-기본 Vector DB 배포 예산은 대상별 합계 `4 vCPU / 8 GiB`다. pgvector, Qdrant, Weaviate, OpenSearch는 단일 컨테이너에 전부 적용하고, Milvus는 본체 `3 vCPU / 6656 MiB`, etcd `0.5 vCPU / 512 MiB`, MinIO `0.5 vCPU / 1 GiB`로 나눈다. `memswap_limit`을 메모리 상한과 같게 설정해 swap 사용도 막는다. 스크립트는 DB 시작 직후 `docker inspect`의 CPU·메모리·swap 합계가 선언 예산과 정확히 같은지 검사하며, 다르면 측정을 시작하지 않는다. 전용 Vector DB 실행에도 필요한 PostgreSQL은 공통 원본 저장소로서 Vector DB 검색 리소스 합계에서는 제외한다.
+CSV에 `database=qdrant` 행이 1개 이상 있고 `actual_recall`이 0보다 크면 성공입니다.
 
-예산을 바꿀 때는 숫자를 명시한다. Milvus 보조 서비스 몫을 제외한 나머지는 스크립트가 본체에 자동 할당한다.
+> 샘플은 배선 확인용 smoke test입니다. 4차원 20건짜리 인위적 데이터이므로
+> **DB 성능 결론에 사용하면 안 됩니다.**
 
-```powershell
-.\scripts\run-all-benchmarks.ps1 `
-  -DatabaseCpuLimit 4.0 `
-  -DatabaseMemoryLimitBytes 8589934592
-```
+본실험 실행은 [docs/04-quickstart/run-benchmark.md](docs/04-quickstart/run-benchmark.md)를 봅니다.
 
-일부 DB만 실행할 수도 있다.
+## Documentation
 
-```powershell
-.\scripts\run-all-benchmarks.ps1 -Profiles pgvector,qdrant
-```
+| 목적 | 문서 |
+|---|---|
+| 시스템 구조와 측정 경로 | [docs/01-overview/architecture.md](docs/01-overview/architecture.md) |
+| 실험이 무엇이고 무엇이 아닌가 | [docs/01-overview/benchmark-overview.md](docs/01-overview/benchmark-overview.md) |
+| 벡터·임베딩·HNSW·Recall 개념 | [docs/02-concepts/](docs/02-concepts/) |
+| 실험 설계와 통제 변수 | [docs/03-benchmark-design/](docs/03-benchmark-design/) |
+| 지표 정의와 읽는 법 | [docs/03-benchmark-design/metrics.md](docs/03-benchmark-design/metrics.md) |
+| 이 실험의 한계 | [docs/03-benchmark-design/limitations.md](docs/03-benchmark-design/limitations.md) |
+| 로컬 설치와 실행 | [docs/04-quickstart/](docs/04-quickstart/) |
+| DB별 설정과 주의점 | [docs/05-databases/](docs/05-databases/) |
+| 코드 구조와 결과 파일 스키마 | [docs/06-implementation/](docs/06-implementation/) |
+| 측정 결과와 판정 | [docs/07-results/](docs/07-results/) |
+| 자주 겪는 문제 | [docs/08-troubleshooting/common-issues.md](docs/08-troubleshooting/common-issues.md) |
 
-0.70과 0.99는 본 비교표에 섞지 않고 필요할 때 별도 보조 실험으로 실행한다.
+## Status
 
-```powershell
-.\scripts\run-all-benchmarks.ps1 `
-  -RequestFile data/benchmark-request-auxiliary.json `
-  -ResultDirectory benchmark-result/auxiliary
-```
-
-프로필과 자동 조절 파라미터는 다음과 같다.
-
-| 프로필 | 검색 파라미터 | 비고 |
-|---|---|---|
-| `pgvector` | `ef_search` | JDBC, benchmark에서는 planner의 순차 스캔을 끔 |
-| `qdrant` | `hnsw_ef` | REST query API |
-| `weaviate` | `ef` | 클래스 HNSW 설정 갱신 |
-| `milvus` | `ef` | flush 후 index 완료까지 대기 |
-| `opensearch` | `ef_search` | k-NN `method_parameters` |
-
-`searchParameters: {}`이면 `[10,20,40,80,120,200,400,800,1000]` 전체를 본 측정과 같은 warm-up, 동시성, 반복 횟수로 시험한다. 같은 실행 조건을 가진 여러 목표는 이 후보 측정값을 공유한다. 허용 범위에 들어오는 후보가 있으면 가장 작은 검색 파라미터를 선택한다. 없으면 목표와 튜닝 Recall의 절대 차이가 가장 작은 후보를 선택하고 `recallSelection=CLOSEST_AVAILABLE`로 기록한다. 명시값을 쓰려면 예를 들어 pgvector 시나리오에 `"searchParameters":{"ef_search":120}`을 넣는다.
-
-pgvector 프로필은 작은 데이터에서도 HNSW 실험이 순차 검색으로 바뀌지 않도록 `enable_seqscan=off`를 검색 세션에 설정한다. 운영 쿼리 계획을 그대로 재현하려는 별도 실험에서는 `PGVECTOR_FORCE_INDEX_SCAN=false`로 끄고 실행 계획을 함께 보관한다.
-
-Qdrant는 기본 optimizer 임계값 때문에 일부 작은 segment가 exact scan으로 남지 않도록 `full_scan_threshold`와 `optimizers_config.indexing_threshold`를 모두 10KB로 고정하고, `indexed_vectors_count`가 전체 건수에 도달할 때까지 기다린다.
-
-Weaviate는 필터 속성을 스키마 생성 시 선언해야 한다. 제공 데이터의 기본 필드는 `application-weaviate.yml`에 넣었으며 다른 메타데이터 키를 사용하면 `vector.weaviate.filter-fields.<이름>=<Weaviate 타입>`을 추가한다.
-
-## 결과 읽기
-
-```text
-benchmark-result/
-├─ raw/ground-truth-top10.jsonl
-├─ raw/benchmark-<run-id>.json
-├─ csv/vector-db-result.csv
-└─ charts/recall-latency-latest.svg
-```
-
-- `time_to_index_ready_ms`: drop/create, 적재, 비동기 인덱싱 완료 대기를 합친 검색 준비 시간이다. 제품 간 순수 index build 단계가 동일하지 않아 이 정의로 통일했다.
-- `upsert_ms`: 위 시간에 포함되는 벡터 적재 구간이다. 한 실행의 첫 시나리오에만 기록한다.
-- `cpu_percent`: 대상 컨테이너 CPU의 평균 합계다. Milvus는 Milvus/etcd/MinIO를 합산한다.
-- `peak_memory_bytes`: 같은 대상 컨테이너 메모리 합계의 최대값이다.
-- `disk_write_bytes`: 검색 측정 중 Docker Block I/O write 증가량이다. 전체 볼륨 크기와 다른 값이다.
-- `index_size_bytes`: DB가 직접 제공하는 범위에서 기록하며 미지원은 `-1`이다.
-- CSV와 JSON에는 `recall_tolerance`, 최종 측정의 허용 범위 충족 여부인 `target_met`/`targetMet`, 선택 방식인 `recall_selection`, 튜닝 시 실제값인 `tuning_recall`, HNSW 생성·검색 파라미터가 모두 남는다.
-- 입력 3개 파일의 SHA-256, OS/CPU/RAM, Java/Spring Boot/Docker 버전, 실제 컨테이너 CPU·메모리 제한도 `environment`에 기록한다.
-- SVG는 같은 result directory의 모든 raw 실행을 모아 DB별 색상으로 그린다.
-
-리소스 값이 `-1`이면 Docker 소켓 권한 또는 `docker stats` 실행 가능 여부부터 확인한다. 수십 ms짜리 smoke run의 자원 수치는 대표성이 없다.
-
-## 검색 API
-
-```http
-GET /api/search/store
-POST /api/search
-POST /api/benchmarks/run
-GET /actuator/health
-```
-
-검색 요청 예:
-
-```json
-{
-  "vector": [0.0, 0.0, 1.0, 0.0],
-  "topK": 3,
-  "filter": {"tenant": "public"},
-  "searchParameters": {"hnsw_ef": 80}
-}
-```
-
-## 검증
+실험 진행 중. 하네스는 동작하며 단위 테스트를 통과합니다.
 
 ```powershell
 .\gradlew.bat test
@@ -205,5 +161,9 @@ GET /actuator/health
 docker compose --profile qdrant --profile weaviate --profile milvus --profile opensearch config --quiet
 ```
 
-DB 선정 판단 기준과 운영상 주의점은 [docs/vector-db-selection-guide.md](docs/vector-db-selection-guide.md)를 본다.
-실제 BGE-M3 데이터로 수행한 1차 본실험 수치와 판정은 [docs/benchmark-report-20260911.md](docs/benchmark-report-20260911.md)에 정리돼 있다.
+| 항목 | 상태 |
+|---|---|
+| 5개 DB 어댑터 | 구현 완료 |
+| 자동 Recall 튜닝 | 구현 완료 |
+| 1차 본실험 | 완료, 측정 결함으로 무효 |
+| 재실행 | 대기 중 |

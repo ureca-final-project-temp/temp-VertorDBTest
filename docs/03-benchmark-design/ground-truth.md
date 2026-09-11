@@ -1,0 +1,98 @@
+# Ground Truth
+
+Recall 계산의 정답지입니다.
+
+## DB가 아니라 Java로 만드는 이유
+
+각 DB에도 exact 검색 모드가 있지만 쓰지 않습니다.
+
+- DB의 exact 구현에 문제가 있으면 정답지 자체가 오염됩니다.
+- 제품마다 exact의 의미와 필터 적용 순서가 다를 수 있습니다.
+- 정답지가 DB에 의존하면 "DB A의 정답으로 DB B를 채점"하는 상황이 생깁니다.
+
+`ExactSearchEngine`은 적재한 것과 동일한 JSONL 벡터를 메모리에 올려 전수 비교합니다.
+DB 구현과 완전히 독립적입니다.
+
+## 계산 방식
+
+```java
+for (IndexedDocument indexed : documents) {
+    if (!matches(document, request.filter())) continue;   // 1. 필터 먼저
+    double score = similarity(queryVector, queryNorm, indexed.embedding(), indexed.norm());
+    // 2. 상위 K개 유지 (min-heap)
+}
+return top.stream().sorted(BEST_FIRST).toList();          // 3. 결정론적 정렬
+```
+
+핵심은 순서입니다. **필터를 먼저 적용한 뒤 유사도로 Top-K를 뽑습니다.**
+"필터를 만족하는 문서 중 가장 가까운 10개"가 정답입니다.
+
+DB가 ANN으로 10개를 먼저 뽑고 그다음 필터를 적용하면(post-filtering) 결과가 10개보다 적어지고
+Recall이 떨어집니다. 그 차이가 지표에 드러나야 하므로 정답지는 반드시 pre-filtering이어야 합니다.
+
+## 정렬 안정성
+
+```java
+Comparator.comparingDouble(VectorSearchResult::score).reversed()
+        .thenComparing(VectorSearchResult::id);
+```
+
+score 동점 시 id 오름차순으로 결정론적 순서를 만듭니다.
+같은 입력이면 항상 같은 정답지가 나옵니다.
+
+## 성능 최적화
+
+각 문서의 L2 노름을 생성 시점에 한 번만 계산해 보관합니다.
+
+```java
+this.documents = documents.stream().map(document -> {
+    float[] embedding = document.embedding();
+    return new IndexedDocument(document, embedding, norm(embedding));
+}).toList();
+```
+
+cosine 계산에서 문서 노름을 매번 다시 구하지 않습니다.
+정답지 계산은 타이머 밖이지만, 300질의 × 10,000문서 × 1024차원이라 무시할 수 없는 비용입니다.
+
+## 캐시
+
+Ground Truth는 `topK`별로 한 번만 계산해 재사용합니다.
+
+```java
+Map<Integer, Map<String, List<VectorSearchResult>>> groundTruthByTopK = new LinkedHashMap<>();
+...
+groundTruthByTopK.computeIfAbsent(scenario.topK(), ignored -> exactGroundTruth(...));
+```
+
+목표 3개가 모두 `topK=10`이므로 실제로는 한 번만 계산됩니다.
+
+## 산출물
+
+```text
+benchmark-result/<dir>/raw/ground-truth-top10.jsonl
+```
+
+```json
+{"queryId":"q-001","topK":["chunk-000-00","chunk-000-04", ...]}
+```
+
+이 파일로 다른 도구에서 Recall을 독립 재검산할 수 있습니다.
+
+## 신뢰 조건
+
+정답지가 유효하려면 **DB에 적재된 벡터와 정답지를 만든 벡터가 같아야** 합니다.
+`BenchmarkRunner`가 적재 직후 확인합니다.
+
+```java
+long storedVectors = store.count();
+if (storedVectors != documents.size()) {
+    throw new IllegalStateException("Vector count mismatch: ...");
+}
+```
+
+건수가 다르면 즉시 중단합니다. 적재 실패를 Recall 저하로 오인하지 않기 위해서입니다.
+
+## 관련 문서
+
+- [../02-concepts/recall.md](../02-concepts/recall.md)
+- [../02-concepts/exact-vs-ann.md](../02-concepts/exact-vs-ann.md)

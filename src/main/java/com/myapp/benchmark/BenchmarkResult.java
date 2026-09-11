@@ -17,6 +17,8 @@ public record BenchmarkResult(
         double p95LatencyMs,
         double p99LatencyMs,
         double qps,
+        QuerySegment filtered,
+        QuerySegment unfiltered,
         double averageCpuPercent,
         long peakMemoryBytes,
         long diskWriteBytes,
@@ -35,6 +37,9 @@ public record BenchmarkResult(
         Instant measuredAt
 ) {
     public BenchmarkResult {
+        // Result files written before the segment split deserialize these as null.
+        filtered = filtered == null ? QuerySegment.EMPTY : filtered;
+        unfiltered = unfiltered == null ? QuerySegment.EMPTY : unfiltered;
         indexParameters = indexParameters == null ? Map.of() : Map.copyOf(indexParameters);
         searchParameters = searchParameters == null ? Map.of() : Map.copyOf(searchParameters);
         environment = environment == null ? Map.of() : Map.copyOf(environment);

@@ -1,4 +1,7 @@
-# Vector DB Benchmark Metrics Guide
+# Metrics
+
+이 벤치마크가 기록하는 지표의 정의와 읽는 법입니다.
+결과 파일의 필드 스키마는 [../06-implementation/result-format.md](../06-implementation/result-format.md)에 있습니다.
 
 본 문서는 Vector DB 비교 실험에서 사용하는 주요 지표의 의미와 해석 기준을 설명한다.
 
@@ -129,6 +132,32 @@ p99 = 18 ms
 ```
 
 평소 요청은 빠르지만 일부 요청에서 latency가 크게 증가하고 있음을 의미한다.
+
+### 필터 질의를 섞은 percentile은 읽지 않는다
+
+질의 집합에 필터 질의와 무필터 질의가 섞여 있으면 percentile은 두 워크로드의 혼합 분포가 된다.
+
+본 프로젝트 질의 300개 중 필터를 가진 것은 30개, 정확히 10%다. 필터 질의가 더 느린 제품에서는
+이 30개가 통째로 p90 위 구간을 차지하므로 **합산 p95와 p99는 ANN 꼬리지연이 아니라 필터 비용**이 된다.
+
+진단은 간단하다. 필터 질의 비율이 `r`일 때 다음이 성립하면 percentile이 필터 집단에 지배당하고 있는 것이다.
+
+```text
+average ≈ (1 - r) × p50 + r × p95
+```
+
+또 하나의 신호는 검색 파라미터에 대한 무반응이다. `hnsw_ef`/`ef_search`를 크게 올렸는데 p50만 오르고
+p95가 그대로면, 그 p95 경로는 HNSW를 타지 않고 있다는 뜻이다. 대부분 필터 필드의 index 누락이 원인이다.
+
+따라서 결과는 다음과 같이 나누어 읽는다.
+
+| 목적 | 사용할 컬럼 |
+|---|---|
+| ANN 인덱스 성능 비교 | `unfiltered_p50_ms`, `unfiltered_p95_ms`, `unfiltered_recall` |
+| 필터 처리 능력 비교 | `filtered_p95_ms`, `filtered_recall` |
+| 실제 서비스 질의 분포의 체감 성능 | 합산 `p50_ms`, `p95_ms` (질의 분포가 서비스와 같을 때만) |
+
+`filtered_recall`이 `unfiltered_recall`보다 뚜렷이 낮으면 post-filtering으로 Top-K를 못 채우고 있다는 신호다.
 
 ---
 
@@ -330,3 +359,12 @@ Qdrant가 pgvector보다 낮은 p95 latency를 기록했다.
 ```
 
 또한 Vector DB별 SDK, Protocol, ANN 구현 및 내부 저장 구조가 다르기 때문에 본 실험은 ANN 알고리즘 자체만을 분리한 성능 비교가 아니라 실제 Spring Boot 애플리케이션에서 Vector DB를 사용하는 전체 검색 경로의 상대 성능 비교로 해석한다.
+
+---
+
+## 관련 문서
+
+- 결과 파일의 필드 스키마 → [../06-implementation/result-format.md](../06-implementation/result-format.md)
+- 이 지표들을 왜곡할 수 있는 조건 → [limitations.md](limitations.md)
+- Recall 개념과 선택 방식 표기 → [../02-concepts/recall.md](../02-concepts/recall.md)
+- 실제로 지표를 잘못 읽었던 사례 → [../07-results/analysis.md](../07-results/analysis.md)
