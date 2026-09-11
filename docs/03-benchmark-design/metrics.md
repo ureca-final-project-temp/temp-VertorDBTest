@@ -13,7 +13,7 @@ Recall@K는 ANN(Approximate Nearest Neighbor) 검색이 Exact Search의 Top-K �
 
 ```text
 Recall@K
-= |Exact Top-K ∩ ANN Top-K| / K
+= |Exact Top-K ∩ ANN Top-K| / min(K, Exact 결과 수)
 ```
 
 예를 들어 Exact Search의 Top-10 중 ANN Search가 9개를 동일하게 찾았다면:
@@ -42,10 +42,18 @@ Recall@5 = 1.0
 본 실험에서는 다음 구간을 비교 기준으로 사용한다.
 
 ```text
+Recall@10 ≈ 0.80
 Recall@10 ≈ 0.90
 Recall@10 ≈ 0.95
-Recall@10 ≈ 0.99
 ```
+
+각 목표의 허용 범위는 ±0.01이다. 범위에 들어오는 탐색 설정이 없으면 가장 가까운
+실제 Recall을 사용하고 `CLOSEST_AVAILABLE`로 명시한다. 0.70과 0.99는 필요할 때만
+보조 실험으로 측정한다.
+
+주 비교의 목표 판정에는 **무필터 질의의 `comparison_recall`**을 사용한다. 필터·무필터
+전체를 합친 `actual_recall`은 실제 질의 혼합의 참고 지표이며, 서로 다른 모집단인
+무필터 p95와 짝지어 목표 판정에 사용하지 않는다.
 
 이 값들은 절대적인 서비스 품질 기준이 아니라 ANN의 검색 품질과 성능 간 trade-off를 비교하기 위한 측정 지점이다.
 
@@ -68,9 +76,7 @@ Recall       p95 latency
 
 Exact Search는 Query Vector와 전체 Document Vector를 직접 비교하여 실제 가장 가까운 Top-K를 계산한다.
 
-본 실험에서는 Exact Search를 두 가지 목적으로 사용한다.
-
-첫 번째는 ANN Recall 계산을 위한 Ground Truth 생성이다.
+본 실험에서 Exact Search는 ANN Recall 계산을 위한 Ground Truth 생성에만 사용한다.
 
 ```text
 Exact Search
@@ -83,17 +89,8 @@ ANN Search
 → Recall@K
 ```
 
-두 번째는 동일 DB 내부에서 ANN Index 사용 전후의 검색 성능을 비교하기 위한 기준선이다.
-
-예:
-
-```text
-Exact p95 = 120 ms
-HNSW p95  =   8 ms
-Recall@10 = 0.96
-```
-
-이는 해당 조건에서 HNSW가 Exact Search 대비 검색 비용을 크게 줄이면서 약 0.96의 Recall을 달성했다는 의미다.
+Java exact 계산은 검색 타이머 밖에서 수행하며 exact latency는 결과에 기록하지 않는다.
+따라서 이 결과만으로 동일 DB의 exact latency와 ANN latency를 비교할 수 없다.
 
 ---
 
@@ -218,36 +215,27 @@ Vector DB 프로세스 또는 Container가 사용하는 RAM 크기를 측정한�
 
 특히 HNSW와 같은 ANN Index는 Index 구조를 메모리에 유지하기 때문에 Vector 수가 증가할수록 Memory Usage가 중요한 비교 항목이 된다.
 
-동일 Dataset과 동일 Recall 수준에서 다음을 비교한다.
-
-```text
-Peak Memory
-Average Memory
-Search 중 Memory Usage
-Index 생성 후 Memory Usage
-```
+현재 구현은 검색 측정 중 500ms 주기와 종료 직후 샘플에서 관측한 컨테이너 합계의
+**최대값(`peak_memory_bytes`)만** 기록한다. 평균 메모리와 인덱스 생성 직후 메모리는
+별도 필드로 기록하지 않는다. OpenSearch처럼 heap을 선점하는 제품은 이 값이 실제 사용량보다
+설정값에 가깝게 보일 수 있다.
 
 ---
 
 ## 7. Disk Usage
 
-Vector 데이터와 ANN Index가 사용하는 저장 공간을 측정한다.
-
-가능하면 다음을 분리해서 기록한다.
-
-```text
-Raw Vector Data Size
-Index Size
-Total DB Storage Size
-```
-
-동일한 검색 성능을 제공하더라도 Index Size가 크게 다를 수 있으므로 대규모 Dataset에서 중요한 지표다.
+현재 구현은 검색 측정 중 Docker Block I/O write 증가량(`disk_write_bytes`)을 기록한다.
+이는 저장 공간 사용량이 아니다. 제품 API로 일관되게 얻을 수 있을 때만
+`index_size_bytes`를 추가하며 미지원 제품은 `-1`이다. Raw vector 크기와 전체 DB 볼륨
+크기는 현재 결과 스키마에 없다.
 
 ---
 
 ## 8. Index Build Time
 
-Dataset 적재 후 ANN Index를 생성하는 데 필요한 시간을 측정한다.
+현재 `time_to_index_ready_ms`는 순수 ANN build 시간이 아니라 drop/create, 적재,
+비동기 인덱싱 완료 확인까지의 **전체 준비 시간**이다. 제품마다 build API 경계가 달라
+운영 관점의 재구축 시간으로만 비교한다.
 
 Index Build Time은 실시간 Query 성능과는 별개지만 다음 상황에서 중요하다.
 
@@ -266,7 +254,10 @@ Migration
 
 ## 9. Insert / Upsert Throughput
 
-초당 삽입 또는 갱신할 수 있는 Vector Record 수를 나타낸다.
+현재 결과는 첫 시나리오에 배치 적재 경과시간 `upsert_ms`만 기록한다.
+별도 지속 부하의 초당 삽입/갱신 처리량을 직접 측정하지 않는다. 같은 건수라면
+`vector_count / (upsert_ms / 1000)`으로 단순 파생할 수 있지만, 이를 장시간 write
+throughput으로 해석하면 안 된다.
 
 ```text
 records / second
@@ -321,8 +312,8 @@ DB B는 검색 성능이 다소 낮지만 Memory 효율이 더 높다.
 메인 시각화는 Recall-Latency Scatter Plot을 사용한다.
 
 ```text
-X축 = p95 Latency
-Y축 = Recall@10
+X축 = unfiltered p95 Latency
+Y축 = comparison Recall@10 (unfiltered)
 ```
 
 왼쪽으로 갈수록 빠르고 위로 갈수록 Recall이 높다.

@@ -17,7 +17,7 @@ import java.util.Map;
 import java.util.Locale;
 
 public class ResultWriter {
-    private static final String CSV_HEADER = "database,index,target_recall,actual_recall,recall_tolerance,target_met,recall_selection,tuning_recall,average_ms,p50_ms,p95_ms,p99_ms,qps,"
+    private static final String CSV_HEADER = "database,index,target_recall,actual_recall,comparison_recall,recall_tolerance,target_met,recall_selection,tuning_recall,average_ms,p50_ms,p95_ms,p99_ms,qps,"
             + "filtered_queries,filtered_recall,filtered_average_ms,filtered_p50_ms,filtered_p95_ms,filtered_p99_ms,"
             + "unfiltered_queries,unfiltered_recall,unfiltered_average_ms,unfiltered_p50_ms,unfiltered_p95_ms,unfiltered_p99_ms,"
             + "cpu_percent,peak_memory_bytes,disk_write_bytes,index_size_bytes,time_to_index_ready_ms,upsert_ms,vector_count,query_executions,concurrency,top_k,warmup_iterations,measurement_iterations,index_parameters,search_parameters,environment,measured_at\n";
@@ -103,9 +103,10 @@ public class ResultWriter {
 
     private String toCsv(BenchmarkResult result) {
         return String.format(Locale.ROOT,
-                "%s,%s,%.6f,%.6f,%.6f,%s,%s,%s,%.6f,%.6f,%.6f,%.6f,%.3f,%s,%s,%.3f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%s,%s,%s%n",
+                "%s,%s,%.6f,%.6f,%.6f,%.6f,%s,%s,%s,%.6f,%.6f,%.6f,%.6f,%.3f,%s,%s,%.3f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%s,%s,%s%n",
                 csv(result.database()), csv(result.indexType()), result.targetRecall(), result.actualRecall(),
-                result.recallTolerance(), result.targetMet(), csv(result.recallSelection()), csvNumber(result.tuningRecall()),
+                result.comparisonRecall(), result.recallTolerance(), result.targetMet(),
+                csv(result.recallSelection()), csvNumber(result.tuningRecall()),
                 result.averageLatencyMs(), result.p50LatencyMs(), result.p95LatencyMs(), result.p99LatencyMs(), result.qps(),
                 csvSegment(result.filtered()), csvSegment(result.unfiltered()),
                 result.averageCpuPercent(), result.peakMemoryBytes(), result.diskWriteBytes(), result.indexSizeBytes(),
@@ -139,6 +140,10 @@ public class ResultWriter {
         return result.unfiltered().queryExecutions() > 0 ? result.unfiltered().p95Ms() : result.p95LatencyMs();
     }
 
+    private double chartRecall(BenchmarkResult result) {
+        return result.comparisonRecall();
+    }
+
     private String scatterPlot(List<BenchmarkResult> results) {
         double maxLatency = Math.max(1, results.stream().mapToDouble(this::chartLatencyMs).max().orElse(1));
         StringBuilder circles = new StringBuilder();
@@ -148,12 +153,13 @@ public class ResultWriter {
             BenchmarkResult result = results.get(i);
             double latency = chartLatencyMs(result);
             double x = 70 + (latency / maxLatency) * 680;
-            double y = 350 - result.actualRecall() * 300;
+            double recall = chartRecall(result);
+            double y = 350 - recall * 300;
             String color = databaseColors.computeIfAbsent(result.database(),
                     ignored -> colors[databaseColors.size() % colors.length]);
             circles.append(String.format(Locale.ROOT,
-                    "<circle cx=\"%.2f\" cy=\"%.2f\" r=\"6\" fill=\"%s\"><title>%s / target %.2f / p95 %.3f ms / recall %.4f</title></circle>%n",
-                    x, y, color, escapeXml(result.database()), result.targetRecall(), latency, result.actualRecall()));
+                    "<circle cx=\"%.2f\" cy=\"%.2f\" r=\"6\" fill=\"%s\"><title>%s / target %.2f / unfiltered p95 %.3f ms / comparison recall %.4f</title></circle>%n",
+                    x, y, color, escapeXml(result.database()), result.targetRecall(), latency, recall));
         }
         StringBuilder legend = new StringBuilder();
         int legendX = 90;
@@ -170,7 +176,7 @@ public class ResultWriter {
                   <line x1="70" y1="350" x2="760" y2="350" stroke="#111827"/>
                   <line x1="70" y1="40" x2="70" y2="350" stroke="#111827"/>
                   <text x="330" y="400" font-family="sans-serif" font-size="14">unfiltered p95 latency (ms)</text>
-                  <text x="18" y="210" transform="rotate(-90 18 210)" font-family="sans-serif" font-size="14">Recall@K</text>
+                  <text x="18" y="210" transform="rotate(-90 18 210)" font-family="sans-serif" font-size="14">unfiltered Recall@K</text>
                   <text x="70" y="370" font-family="sans-serif" font-size="11">0</text>
                   <text x="720" y="370" font-family="sans-serif" font-size="11">%.2f</text>
                   <text x="42" y="54" font-family="sans-serif" font-size="11">1.0</text>

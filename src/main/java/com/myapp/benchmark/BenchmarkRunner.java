@@ -6,6 +6,7 @@ import com.myapp.domain.vector.BenchmarkQuery;
 import com.myapp.domain.vector.VectorDocument;
 import com.myapp.domain.vector.VectorSearchRequest;
 import com.myapp.domain.vector.VectorSearchResult;
+import com.myapp.infrastructure.rdb.postgres.BenchmarkSourceOfTruthSynchronizer;
 import com.myapp.port.VectorIndexManager;
 import com.myapp.port.VectorStore;
 import org.springframework.beans.factory.ObjectProvider;
@@ -28,6 +29,7 @@ import java.util.concurrent.Future;
 public class BenchmarkRunner {
     private final ObjectProvider<VectorStore> storeProvider;
     private final ObjectProvider<VectorIndexManager> indexManagerProvider;
+    private final ObjectProvider<BenchmarkSourceOfTruthSynchronizer> sourceOfTruthProvider;
     private final BenchmarkProperties properties;
     private final VectorDatasetLoader vectorDatasetLoader;
     private final QuerySetLoader querySetLoader;
@@ -39,11 +41,13 @@ public class BenchmarkRunner {
     public BenchmarkRunner(
             ObjectProvider<VectorStore> storeProvider,
             ObjectProvider<VectorIndexManager> indexManagerProvider,
+            ObjectProvider<BenchmarkSourceOfTruthSynchronizer> sourceOfTruthProvider,
             BenchmarkProperties properties,
             ObjectMapper objectMapper
     ) {
         this.storeProvider = storeProvider;
         this.indexManagerProvider = indexManagerProvider;
+        this.sourceOfTruthProvider = sourceOfTruthProvider;
         this.properties = properties;
         this.vectorDatasetLoader = new VectorDatasetLoader(objectMapper);
         this.querySetLoader = new QuerySetLoader(objectMapper);
@@ -59,7 +63,11 @@ public class BenchmarkRunner {
         List<VectorDocument> documents = vectorDatasetLoader.load(properties.getDocumentVectors());
         List<BenchmarkQuery> queries = querySetLoader.load(properties.getQueryDefinitions(), properties.getQueryVectors());
         validateDimensions(documents, queries, store);
-        Map<String, Object> environment = environmentCollector.collect(properties);
+        Map<String, Object> environmentValues = new LinkedHashMap<>(environmentCollector.collect(properties));
+        sourceOfTruthProvider.ifAvailable(synchronizer -> environmentValues.put("sourceOfTruth",
+                synchronizer.synchronize(documents,
+                        environmentValues.get("documentVectorsSha256").toString(), rebuildAndLoad)));
+        Map<String, Object> environment = Map.copyOf(environmentValues);
 
         long indexBuildTimeMs = 0;
         long upsertTimeMs = 0;
@@ -149,16 +157,18 @@ public class BenchmarkRunner {
             resourceUsage = resources.usage();
             LatencyCollector.Statistics stats = latency.statistics();
             double recall = recallValues.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+            QuerySegment filtered = QuerySegment.of(latency.filteredStatistics(), filteredRecalls);
+            QuerySegment unfiltered = QuerySegment.of(latency.unfilteredStatistics(), unfilteredRecalls);
+            double comparisonRecall = unfiltered.recall() == null ? recall : unfiltered.recall();
             double qps = tasks.size() / (elapsed / 1_000_000_000.0);
             double recallTolerance = properties.getTargetRecallTolerance();
             return new BenchmarkResult(
-                    store.database(), indexManager.indexType(), scenario.targetRecall(), recall,
+                    store.database(), indexManager.indexType(), scenario.targetRecall(), recall, comparisonRecall,
                     recallTolerance,
-                    RecallTargetSelector.withinTolerance(recall, scenario.targetRecall(), recallTolerance),
+                    RecallTargetSelector.withinTolerance(comparisonRecall, scenario.targetRecall(), recallTolerance),
                     tuning.strategy(), tuning.tuningRecall(),
                     stats.averageMs(), stats.p50Ms(), stats.p95Ms(), stats.p99Ms(), qps,
-                    QuerySegment.of(latency.filteredStatistics(), filteredRecalls),
-                    QuerySegment.of(latency.unfilteredStatistics(), unfilteredRecalls),
+                    filtered, unfiltered,
                     resourceUsage.averageCpuPercent(), resourceUsage.peakMemoryBytes(), resourceUsage.diskWriteBytes(),
                     indexManager.indexSizeBytes(), indexBuildTimeMs, upsertTimeMs, documents.size(), tasks.size(),
                     scenario.concurrency(), scenario.topK(), scenario.warmupIterations(), scenario.measurementIterations(),
@@ -231,14 +241,21 @@ public class BenchmarkRunner {
             String parameterKey,
             List<Integer> candidates
     ) {
+        List<BenchmarkQuery> comparisonQueries = queries.stream()
+                .filter(query -> query.filter().isEmpty())
+                .toList();
+        if (comparisonQueries.isEmpty()) comparisonQueries = queries;
         List<RecallTargetSelector.Candidate<Map<String, Object>>> measured = new ArrayList<>(candidates.size());
         for (int candidate : candidates) {
             Map<String, Object> parameters = Map.of(parameterKey, candidate);
             indexManager.configureSearch(parameters);
             for (int pass = 0; pass < scenario.warmupIterations(); pass++) {
-                for (BenchmarkQuery query : queries) store.search(request(query, scenario, parameters));
+                for (BenchmarkQuery query : comparisonQueries) {
+                    store.search(request(query, scenario, parameters));
+                }
             }
-            double recall = recallUnderMeasurementConcurrency(store, queries, scenario, groundTruth, parameters);
+            double recall = recallUnderMeasurementConcurrency(
+                    store, comparisonQueries, scenario, groundTruth, parameters);
             measured.add(new RecallTargetSelector.Candidate<>(parameters, recall));
         }
         return List.copyOf(measured);

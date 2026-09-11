@@ -8,6 +8,7 @@ public record BenchmarkResult(
         String indexType,
         double targetRecall,
         double actualRecall,
+        Double comparisonRecall,
         double recallTolerance,
         boolean targetMet,
         String recallSelection,
@@ -40,6 +41,12 @@ public record BenchmarkResult(
         // Result files written before the segment split deserialize these as null.
         filtered = filtered == null ? QuerySegment.EMPTY : filtered;
         unfiltered = unfiltered == null ? QuerySegment.EMPTY : unfiltered;
+        comparisonRecall = comparisonRecall == null
+                ? (unfiltered.recall() == null ? actualRecall : unfiltered.recall())
+                : comparisonRecall;
+        if (!Double.isFinite(comparisonRecall)) {
+            throw new IllegalArgumentException("comparisonRecall must be finite");
+        }
         indexParameters = indexParameters == null ? Map.of() : Map.copyOf(indexParameters);
         searchParameters = searchParameters == null ? Map.of() : Map.copyOf(searchParameters);
         environment = environment == null ? Map.of() : Map.copyOf(environment);

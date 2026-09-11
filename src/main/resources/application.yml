@@ -11,6 +11,8 @@ spring:
         enabled: false
   flyway:
     enabled: false
+    baseline-on-migrate: true
+    baseline-version: 0
 
 vector:
   store:

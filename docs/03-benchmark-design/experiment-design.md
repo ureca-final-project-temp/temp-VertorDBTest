@@ -12,6 +12,8 @@
 3. **입력은 파일로 고정한다.** 같은 float를 다섯 DB에 재사용하고 SHA-256으로 확인합니다.
 4. **자원 상한을 검증한다.** 선언만 하지 않고 측정 직전에 `docker inspect`로 실제 값을 확인합니다.
 5. **목표를 못 맞췄으면 그렇다고 기록한다.** 숨기지 않고 `CLOSEST_AVAILABLE`로 표시합니다.
+6. **비교 모집단을 섞지 않는다.** 목표 Recall 튜닝과 ANN 비교는 무필터 질의를 사용하고,
+   필터 질의는 별도 지표로 판정합니다.
 
 ## 시나리오 구조
 
@@ -44,18 +46,20 @@
 ## 실행 순서
 
 ```text
-1. rebuildAndLoad = true
+1. 입력 로드·해시 검증
+   └─ PostgreSQL Source of Truth 동기화 (200 documents / 10,000 chunks)
+2. rebuildAndLoad = true
    ├─ indexManager.rebuild()          drop → create
    ├─ store.upsert(...)               배치 256건
    └─ indexManager.awaitReady(...)    비동기 인덱싱 완료 대기
-2. store.count() == 문서 수 검증      틀리면 즉시 중단
-3. Ground Truth 계산 (topK별 1회, 캐시)
-4. 시나리오마다
-   ├─ 자동 튜닝 (같은 실행 조건의 목표끼리 후보 측정값 공유)
+3. store.count() == chunk 수 검증      틀리면 즉시 중단
+4. Ground Truth 계산 (topK별 1회, 캐시)
+5. 시나리오마다
+   ├─ 무필터 질의 자동 튜닝 (같은 실행 조건의 목표끼리 후보 측정값 공유)
    ├─ configureSearch(선택된 파라미터)
    ├─ warm-up
    └─ 본 측정  ← 여기만 타이머와 자원 샘플링 적용
-5. JSON + CSV + SVG 출력
+6. JSON + CSV + SVG 출력
 ```
 
 `time_to_index_ready_ms`와 `upsert_ms`는 한 실행의 **첫 시나리오에만** 기록됩니다.
@@ -71,7 +75,7 @@
 | DB·목표당 측정 요청 | 300 × 5 = 1,500건 |
 | DB당 본실험 측정 요청 | 1,500 × 3 = 4,500건 |
 
-자동 튜닝은 후보 9개에 대해 같은 warm-up·동시성·반복을 수행합니다.
+자동 튜닝은 후보 9개에 대해 무필터 270개 질의로 같은 warm-up·동시성·반복을 수행합니다.
 같은 실행 조건을 가진 목표들은 이 후보 측정값을 공유합니다.
 
 ## 실행 격리
@@ -88,6 +92,7 @@
 - OS / CPU / 논리 코어 수 / 물리 메모리
 - Java 버전, Spring Boot 버전, Docker 서버 버전
 - 선언한 자원 예산과 `docker inspect`가 보고한 실제 컨테이너 상한
+- PostgreSQL Source of Truth의 입력 SHA-256, 원문 수, 청크 수, 이번 실행의 동기화 여부
 
 이 값이 다르면 서로 다른 실험입니다.
 

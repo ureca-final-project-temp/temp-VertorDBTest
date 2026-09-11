@@ -7,6 +7,7 @@
 | 변수 | 값 | 강제 방법 |
 |---|---|---|
 | 벡터 파일 | 동일 1024차원 JSONL | `environment`에 SHA-256 기록 |
+| Source of Truth | PostgreSQL 원문 200건 / 청크 10,000건 | Flyway + 스냅샷 SHA-256·건수 검증 |
 | 차원 | 1024 | `validateDimensions()` 불일치 시 실행 거부 |
 | distance metric | COSINE | 스토어 metric과 불일치 시 실행 거부 |
 | 인덱스 종류 | HNSW | 시나리오 `indexType`과 불일치 시 실행 거부 |
@@ -85,7 +86,7 @@ Milvus 보조 서비스 몫(0.5 vCPU + 512 MiB, 0.5 vCPU + 1 GiB)을 제외한 �
 | 클라이언트 직렬화 비용 | DB마다 다름 (JDBC 바이너리 vs JSON vs GraphQL 문자열) |
 | 클라이언트 JVM 자원 | 상한 없음. DB 컨테이너와 같은 호스트 |
 | Docker Desktop 네트워크 | Windows/WSL2 포트포워드 경유 |
-| 동시에 떠 있는 PostgreSQL | 모든 프로필에서 4 vCPU / 8 GiB를 함께 점유 |
+| 동시에 떠 있는 PostgreSQL | 전용 DB 프로필에서도 Source of Truth용 4 vCPU / 8 GiB가 호스트에 함께 존재하지만 측정 합계에서는 제외 |
 | 인덱스 빌드 반복 | 현재 1회. 빌드 편차를 반영하지 않음 |
 | OpenSearch JVM heap | `-Xms4g -Xmx4g` 선점. 메모리 수치가 사용량이 아님 |
 

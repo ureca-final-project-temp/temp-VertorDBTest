@@ -11,7 +11,7 @@ public class WeaviateProperties {
     private String baseUrl = "http://localhost:18080";
     private String apiKey = "";
     private String className = "BenchmarkChunk";
-    private int dimension = 384;
+    private int dimension = 1024;
     private DistanceMetric metric = DistanceMetric.COSINE;
     private int hnswM = 16;
     private int efConstruction = 128;

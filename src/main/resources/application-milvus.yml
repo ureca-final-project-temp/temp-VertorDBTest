@@ -12,7 +12,7 @@ vector:
     token: ${MILVUS_TOKEN:root:Milvus}
     database: ${MILVUS_DATABASE:default}
     collection: ${MILVUS_COLLECTION:benchmark_chunks}
-    dimension: ${VECTOR_DIMENSION:384}
+    dimension: ${VECTOR_DIMENSION:1024}
     metric: ${VECTOR_METRIC:COSINE}
     hnsw-m: ${HNSW_M:16}
     ef-construction: ${HNSW_EF_CONSTRUCTION:128}

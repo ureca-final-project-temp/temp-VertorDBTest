@@ -91,7 +91,9 @@ throw new IllegalArgumentException("Weaviate filter field is not declared: " + e
 `configureSearch()`가 스키마를 GET → 수정 → PUT 합니다.
 
 즉 **자동 튜닝 중 후보 9개를 시험하면 스키마가 9번 갱신됩니다.**
-튜닝 구간의 지연시간에 이 영향이 섞일 수 있습니다.
+스키마 GET/PUT 자체는 `store.search()` 타이머 밖이므로 검색 latency에 직접 합산되지 않습니다.
+다만 연속 설정 변경이 인덱스와 캐시의 warm 상태에 영향을 줄 수 있어 최종 결과는 warm-cache
+조건으로만 해석합니다.
 
 ### 질의 벡터가 GraphQL 문자열로 전송됩니다
 

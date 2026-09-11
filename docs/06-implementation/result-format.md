@@ -34,24 +34,25 @@ benchmark-result/<dir>/
   "database": "qdrant",
   "indexType": "hnsw",
   "targetRecall": 0.95,
-  "actualRecall": 0.9417,
+  "actualRecall": 0.957,
+  "comparisonRecall": 0.952222,
   "recallTolerance": 0.01,
   "targetMet": true,
   "recallSelection": "WITHIN_TOLERANCE",
-  "tuningRecall": 0.9417,
-  "averageLatencyMs": 23.55,
-  "p50LatencyMs": 5.04,
-  "p95LatencyMs": 126.64,
-  "p99LatencyMs": 284.93,
-  "qps": 420.01,
-  "filtered":   {"queryExecutions": 150,  "recall": 0.88, "averageMs": ..., "p50Ms": ..., "p95Ms": ..., "p99Ms": ...},
-  "unfiltered": {"queryExecutions": 1350, "recall": 0.95, "averageMs": ..., "p50Ms": ..., "p95Ms": ..., "p99Ms": ...},
-  "averageCpuPercent": 213.31,
-  "peakMemoryBytes": 101817958,
-  "diskWriteBytes": 4096,
+  "tuningRecall": 0.952222,
+  "averageLatencyMs": 3.602493,
+  "p50LatencyMs": 3.3706,
+  "p95LatencyMs": 5.5466,
+  "p99LatencyMs": 7.179,
+  "qps": 2751.515,
+  "filtered":   {"queryExecutions": 150,  "recall": 1.0, "averageMs": 3.741035, "p50Ms": 3.5421, "p95Ms": 5.4356, "p99Ms": 6.794},
+  "unfiltered": {"queryExecutions": 1350, "recall": 0.952222, "averageMs": 3.587099, "p50Ms": 3.3464, "p95Ms": 5.6153, "p99Ms": 7.28},
+  "averageCpuPercent": 0.15,
+  "peakMemoryBytes": 106220748,
+  "diskWriteBytes": 0,
   "indexSizeBytes": -1,
-  "indexBuildTimeMs": 5143,
-  "upsertTimeMs": 3891,
+  "indexBuildTimeMs": 0,
+  "upsertTimeMs": 0,
   "vectorCount": 10000,
   "queryExecutions": 1500,
   "concurrency": 10,
@@ -59,9 +60,9 @@ benchmark-result/<dir>/
   "warmupIterations": 1,
   "measurementIterations": 5,
   "indexParameters": {...},
-  "searchParameters": {"hnsw_ef": 1000},
+  "searchParameters": {"hnsw_ef": 20},
   "environment": {...},
-  "measuredAt": "2026-09-11T02:51:17.281Z"
+  "measuredAt": "2026-09-11T05:11:24.375Z"
 }
 ```
 
@@ -73,10 +74,11 @@ benchmark-result/<dir>/
 |---|---|
 | `targetRecall` | 목표 |
 | `actualRecall` | 본 측정 5회 평균 (전체 질의) |
+| `comparisonRecall` | 주 비교 모집단인 무필터 질의의 본 측정 Recall. 무필터가 없으면 전체 Recall |
 | `recallTolerance` | 허용오차 (기본 0.01) |
-| `targetMet` | 본 측정이 허용 범위를 충족했는지 |
+| `targetMet` | `comparisonRecall`이 허용 범위를 충족했는지 |
 | `recallSelection` | `WITHIN_TOLERANCE` / `CLOSEST_AVAILABLE` / `EXPLICIT_PARAMETERS` |
-| `tuningRecall` | 튜닝 단계에서 그 후보가 기록한 Recall. 명시 파라미터면 null |
+| `tuningRecall` | 무필터 튜닝 단계에서 그 후보가 기록한 Recall. 명시 파라미터면 null |
 
 ### 지연시간
 
@@ -118,7 +120,11 @@ int index = Math.max(0, (int) Math.ceil(percentile * sorted.size()) - 1);
   "metric": "COSINE",
   "documentVectorsSha256": "cc23f0...",
   "queryDefinitionsSha256": "...",
-  "queryVectorsSha256": "d06cc8..."
+  "queryVectorsSha256": "d06cc8...",
+  "sourceOfTruth": {
+    "datasetSha256": "cc23f0...", "documentCount": 200,
+    "chunkCount": 10000, "synchronizedNow": false
+  }
 }
 ```
 
@@ -126,10 +132,10 @@ int index = Math.max(0, (int) Math.ceil(percentile * sorted.size()) - 1);
 
 ## vector-db-result.csv
 
-41개 컬럼입니다.
+42개 컬럼입니다.
 
 ```text
-database,index,target_recall,actual_recall,recall_tolerance,target_met,recall_selection,tuning_recall,
+database,index,target_recall,actual_recall,comparison_recall,recall_tolerance,target_met,recall_selection,tuning_recall,
 average_ms,p50_ms,p95_ms,p99_ms,qps,
 filtered_queries,filtered_recall,filtered_average_ms,filtered_p50_ms,filtered_p95_ms,filtered_p99_ms,
 unfiltered_queries,unfiltered_recall,unfiltered_average_ms,unfiltered_p50_ms,unfiltered_p95_ms,unfiltered_p99_ms,
@@ -154,9 +160,9 @@ throw new IllegalStateException("Existing CSV schema is incompatible; use a new 
 
 ## charts/recall-latency-*.svg
 
-x축은 **unfiltered p95**, y축은 Recall입니다.
+x축은 **unfiltered p95**, y축은 **comparison Recall(unfiltered)**입니다.
 합산 p95는 필터 비용을 반영하므로 차트 축으로 쓰지 않습니다.
-구간 데이터가 없는 예전 결과는 합산 p95로 대체됩니다.
+구간 데이터가 없는 예전 결과는 x축을 합산 p95, y축을 전체 `actualRecall`로 대체합니다.
 
 같은 디렉터리의 모든 `raw/benchmark-*.json`을 다시 읽어 재생성하므로
 다섯 DB를 순서대로 실행하면 마지막 차트에 전부 들어갑니다.

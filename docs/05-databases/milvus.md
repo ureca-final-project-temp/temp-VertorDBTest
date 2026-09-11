@@ -86,13 +86,15 @@ CPU·메모리 지표도 세 컨테이너 합산입니다.
 ### 결과가 비결정적입니다
 
 여러 segment에 걸친 검색이라 같은 파라미터에서도 Recall이 미세하게 흔들립니다.
-실제로 튜닝 Recall과 본 측정 Recall이 다르게 나오는 유일한 DB입니다.
+튜닝 Recall과 본 측정 Recall이 달라질 수 있으므로 선택 표시만 보지 말고 본 측정의
+`comparison_recall`과 `target_met`을 함께 확인해야 합니다.
 
 ```text
-tuning_recall 0.9130  →  actual_recall 0.9030
+tuning_recall 0.9578  →  comparison_recall 0.7422, target_met=false
 ```
 
-다른 DB는 두 값이 소수점까지 같습니다.
+위 값은 2026-09-11 단일 재실행에서 관측한 큰 변동 사례이며, 모든 실행에서 같은 폭으로
+발생한다는 뜻은 아닙니다.
 
 ### metadata가 JSON 필드입니다
 

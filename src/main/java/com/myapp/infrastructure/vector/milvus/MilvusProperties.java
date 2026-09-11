@@ -9,7 +9,7 @@ public class MilvusProperties {
     private String token = "root:Milvus";
     private String database = "default";
     private String collection = "benchmark_chunks";
-    private int dimension = 384;
+    private int dimension = 1024;
     private DistanceMetric metric = DistanceMetric.COSINE;
     private int hnswM = 16;
     private int efConstruction = 128;

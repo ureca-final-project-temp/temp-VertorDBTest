@@ -2,8 +2,8 @@
 
 ## 완료 기준
 
-다섯 DB의 측정 결과가 하나의 CSV에 모이고, 각 행의 `recall_selection`으로
-그 행을 비교에 쓸 수 있는지 판단할 수 있습니다.
+다섯 DB의 측정 결과가 하나의 CSV에 모이고, 각 행의 `recall_selection`과
+`target_met`을 함께 확인해 그 행을 비교에 쓸 수 있는지 판단할 수 있습니다.
 
 ## 사전 요구사항
 
@@ -37,7 +37,7 @@
 
 ```powershell
 Import-Csv benchmark-result/run-01/csv/vector-db-result.csv |
-  Select-Object database, target_recall, actual_recall, recall_selection,
+  Select-Object database, target_recall, comparison_recall, target_met, recall_selection,
                 unfiltered_p95_ms, filtered_p95_ms, qps | Format-Table -AutoSize
 ```
 
@@ -94,13 +94,13 @@ benchmark-result/run-01/
 ├─ raw/ground-truth-top10.jsonl      정답지
 ├─ raw/benchmark-<run-id>.json       실행별 전체 결과
 ├─ csv/vector-db-result.csv          누적 비교표
-├─ charts/recall-latency-latest.svg  Recall vs unfiltered p95
+├─ charts/recall-latency-latest.svg  unfiltered Recall vs unfiltered p95
 └─ logs/                             DB별 애플리케이션 로그
 ```
 
 읽는 순서:
 
-1. `recall_selection`이 `WITHIN_TOLERANCE`인 행만 고릅니다.
+1. `recall_selection=WITHIN_TOLERANCE`이면서 `target_met=true`인 행만 고릅니다.
 2. 같은 `target_recall`끼리 묶습니다.
 3. `unfiltered_p95_ms`로 ANN 성능을, `filtered_p95_ms`로 필터 처리 능력을 비교합니다.
 4. CPU가 1% 미만인 행은 과소 집계이므로 자원 비교에서 제외합니다.

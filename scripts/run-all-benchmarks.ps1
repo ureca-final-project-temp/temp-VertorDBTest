@@ -53,9 +53,16 @@ foreach ($required in @($jar, $requestPath, $documentVectors, $queryVectors, $qu
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 
 function Wait-HttpReady {
-    param([string]$Uri, [int]$TimeoutSeconds = 180)
+    param(
+        [string]$Uri,
+        [int]$TimeoutSeconds = 180,
+        [System.Diagnostics.Process]$Process
+    )
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
+        if ($null -ne $Process -and $Process.HasExited) {
+            throw "Process exited with code $($Process.ExitCode) while waiting for $Uri"
+        }
         try {
             $response = Invoke-WebRequest -Uri $Uri -TimeoutSec 5 -UseBasicParsing
             if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) { return }
@@ -151,7 +158,7 @@ try {
             )
             $application = Start-Process -FilePath 'java' -ArgumentList $arguments -PassThru -WindowStyle Hidden `
                 -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-            Wait-HttpReady "http://localhost:$ApplicationPort/actuator/health" 120
+            Wait-HttpReady "http://localhost:$ApplicationPort/actuator/health" 120 $application
 
             $body = Get-Content -LiteralPath $requestPath -Raw
             $response = Invoke-RestMethod -Method Post -Uri "http://localhost:$ApplicationPort/api/benchmarks/run" `
@@ -160,7 +167,7 @@ try {
                 (Join-Path $resolvedResultDirectory "api-response-$profile.json") -Encoding utf8
             # Filtered and unfiltered queries are shown apart: with a filtered minority the
             # combined p95 reports filter cost, not ANN tail latency.
-            $response.results | Select-Object database, targetRecall, actualRecall, targetMet,
+            $response.results | Select-Object database, targetRecall, actualRecall, comparisonRecall, targetMet,
                 recallSelection, tuningRecall,
                 @{ Name = 'unfilteredP95Ms'; Expression = { $_.unfiltered.p95Ms } },
                 @{ Name = 'unfilteredRecall'; Expression = { $_.unfiltered.recall } },

@@ -58,6 +58,8 @@ public class QdrantIndexManager implements VectorIndexManager {
         long fullScanThresholdBytes = properties.getFullScanThreshold() * 1024L;
         if (estimatedVectorBytes < fullScanThresholdBytes) {
             // Qdrant deliberately uses exact scan below this collection-size threshold.
+            JsonNode result = client.get("/collections/" + properties.getCollection()).get("result");
+            requirePayloadIndexes(result);
             return;
         }
         long deadline = System.nanoTime() + timeout.toNanos();

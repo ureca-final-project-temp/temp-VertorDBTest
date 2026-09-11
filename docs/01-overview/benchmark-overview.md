@@ -10,7 +10,8 @@
 
 | 항목 | 정의 |
 |---|---|
-| Recall@10 | Java brute-force exact Top-10 대비 ANN Top-10의 일치 비율 |
+| 비교 Recall@10 | 무필터 질의에서 Java brute-force exact Top-10 대비 ANN Top-10의 일치 비율 |
+| 전체 Recall@10 | 필터·무필터를 합친 실제 질의 집합의 참고 지표 |
 | Latency | `VectorStore.search()` 한 번의 실행 시간. p50 / p95 / p99 |
 | QPS | 측정 구간 전체 요청 수 ÷ 측정 구간 소요 시간 |
 | CPU / RAM | 대상 컨테이너의 `docker stats` 합계 |
@@ -38,7 +39,7 @@ data/queries_300.jsonl ─────┴─> Ollama bge-m3 ─> 1024차원 벡�
                     │                                │
                     └──> Ground Truth ──> Recall@10 <┘
                                              │
-                            목표 구간(0.80/0.90/0.95 ±0.01)에 맞는
+                            무필터 Recall 목표 구간(0.80/0.90/0.95 ±0.01)에 맞는
                             탐색 파라미터 자동 선택
                                              │
                                              ↓
@@ -55,7 +56,8 @@ DB를 바꾸려면 Spring 프로필과 Docker 프로필을 함께 바꿔 다시 
 다섯 DB를 순서대로 도는 것은 `scripts/run-all-benchmarks.ps1`이 담당합니다.
 
 한 DB의 본실험 1회는 목표 3개 × 300질의 × 5회 = 4,500건의 측정 요청과,
-그에 앞선 자동 튜닝 요청으로 구성됩니다.
+그에 앞선 자동 튜닝 요청으로 구성됩니다. 자동 튜닝은 ANN 자체 비교 모집단인 무필터
+270개 질의만 사용하고, 본 측정은 전체 300개를 실행해 필터/무필터 결과를 따로 기록합니다.
 
 ## 다음 문서
 

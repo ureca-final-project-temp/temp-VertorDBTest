@@ -11,7 +11,7 @@ vector:
     base-url: ${WEAVIATE_URL:http://localhost:18080}
     api-key: ${WEAVIATE_API_KEY:}
     class-name: ${WEAVIATE_CLASS:BenchmarkChunk}
-    dimension: ${VECTOR_DIMENSION:384}
+    dimension: ${VECTOR_DIMENSION:1024}
     metric: ${VECTOR_METRIC:COSINE}
     hnsw-m: ${HNSW_M:16}
     ef-construction: ${HNSW_EF_CONSTRUCTION:128}

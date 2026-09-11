@@ -49,6 +49,9 @@ embedding과 chunking 품질의 영향을 함께 받습니다.
 
 허용오차는 각 목표의 **±0.01**입니다.
 
+주 비교는 필터가 없는 270개 질의의 Recall을 사용합니다. 결과의 `comparison_recall`이
+그 값이며, 필터를 포함한 300개 전체의 `actual_recall`은 서비스 혼합 참고값입니다.
+
 보조 목표 0.70과 0.99는 주 비교표에 섞지 않고 필요할 때 별도로 실행합니다
 (`data/benchmark-request-auxiliary.json`).
 
@@ -58,12 +61,14 @@ embedding과 chunking 품질의 영향을 함께 받습니다.
 
 | 값 | 의미 | 비교에 사용 |
 |---|---|---|
-| `WITHIN_TOLERANCE` | 목표 ±0.01 안에 드는 후보를 찾음 | O |
+| `WITHIN_TOLERANCE` | 튜닝에서 목표 ±0.01 안에 드는 후보를 찾음 | `target_met=true`일 때만 O |
 | `CLOSEST_AVAILABLE` | 구간에 드는 후보가 없어 가장 가까운 값을 선택 | **X** |
 | `EXPLICIT_PARAMETERS` | 사용자가 검색 파라미터를 직접 지정 | 조건부 |
 
 `CLOSEST_AVAILABLE` 행끼리, 또는 그 행과 `WITHIN_TOLERANCE` 행을 나란히 두고
 "어느 DB가 빠르다"고 말하면 안 됩니다. 서로 다른 Recall의 속도를 비교하는 것이기 때문입니다.
+튜닝 후 본 측정 값이 달라질 수도 있으므로 `recall_selection`뿐 아니라 `target_met`도
+반드시 확인합니다.
 
 ## 목표를 못 맞추는 경우
 
@@ -71,7 +76,7 @@ embedding과 chunking 품질의 영향을 함께 받습니다.
 더 근본적으로, **최소 후보에서 이미 목표를 넘어버리는** DB가 있습니다.
 
 ```text
-OpenSearch ef_search=10  → Recall 0.93   ← 0.80도 0.90도 도달 불가
+OpenSearch ef_search=10  → 비교 Recall 0.9296   ← 0.80도 0.90도 도달 불가
 ```
 
 후보는 `candidate >= topK` 조건으로 걸러지므로 10 밑으로 내려갈 수 없습니다.

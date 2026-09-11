@@ -78,6 +78,36 @@ Invoke-RestMethod http://localhost:6333/collections/benchmark_chunks |
 
 ---
 
+## PostgreSQL source snapshot does not match
+
+```text
+IllegalStateException: PostgreSQL source snapshot does not match the benchmark input;
+run with rebuildAndLoad=true
+```
+
+`documents`, `document_chunks`, `benchmark_dataset_state`의 해시 또는 건수가 현재 vector
+JSONL과 다릅니다. 변경된 원본을 검색 DB에 조용히 재사용하지 않도록 막은 것입니다.
+
+### 해결
+
+입력을 의도적으로 교체한 것이 맞는지 먼저 확인한 뒤 `rebuildAndLoad: true`로 실행합니다.
+동기화가 끝나면 PostgreSQL에는 원문 200건과 chunk 10,000건이 있어야 합니다.
+
+---
+
+## Flyway가 non-empty schema에서 시작하지 못한다
+
+```text
+Found non-empty schema(s) "public" but no schema history table
+```
+
+이 프로젝트는 `spring.flyway.baseline-version=0`과 `baseline-on-migrate=true`로 기존 개발
+볼륨을 인수합니다. 해당 설정을 지웠거나 프로필에서 덮어쓰지 않았는지 확인합니다.
+baseline을 1로 올리면 기존 볼륨에서 V1 Source of Truth 테이블 생성을 건너뛸 수 있으므로
+임의로 바꾸지 않습니다.
+
+---
+
 ## Resource budget mismatch
 
 ```text

@@ -60,7 +60,8 @@ String key = switch (store.database().toLowerCase()) {
 ## 자동 튜닝
 
 `searchParameters: {}`로 요청하면 후보 `[10, 20, 40, 80, 120, 200, 400, 800, 1000]` 전체를
-본 측정과 같은 warm-up·동시성·반복 횟수로 시험한 뒤, 목표 Recall 구간에 드는 **가장 작은** 값을 고릅니다.
+무필터 270개 질의에 대해 본 측정과 같은 warm-up·동시성·반복 횟수로 시험한 뒤,
+목표 Recall 구간에 드는 **가장 작은** 값을 고릅니다.
 
 ```text
 ef_search=10   → Recall 0.71
@@ -72,6 +73,8 @@ ef_search=120  → Recall 0.93
 
 구간에 드는 후보가 없으면 목표와 가장 가까운 후보를 고르고 `CLOSEST_AVAILABLE`로 기록합니다.
 이 표시가 붙은 행은 "동일 Recall 비교"에 사용할 수 없습니다.
+`WITHIN_TOLERANCE`여도 본 측정의 `target_met=false`이면 튜닝 이후 Recall이 변한 것이므로
+직접 비교에서 제외합니다.
 
 명시값을 쓰려면 시나리오에 직접 넣습니다.
 
@@ -86,7 +89,8 @@ ef_search=120  → Recall 0.93
 
 `VectorIndexManager.awaitReady()`가 제품별 장벽을 담당합니다.
 
-- **Qdrant** — `indexed_vectors_count`가 전체 건수에 도달하고 status가 `green`이 될 때까지 대기
+- **Qdrant** — `indexed_vectors_count`가 전체 건수에 도달하고 status가 `green`이 될 때까지 대기.
+  exact-scan 임계값 아래에서는 이 건수 대기만 생략하고 payload index 검증은 수행
 - **Milvus** — `flush` 후 `indexState=Finished`, `indexedRows >= 전체`, `pendingRows == 0`까지 대기
 - **OpenSearch** — bulk 적재에 `refresh=wait_for`
 - **pgvector / Weaviate** — 동기 경로라 별도 장벽 없음

@@ -44,15 +44,17 @@ pgvector는 추가로 매 질의마다 `set_config` 왕복을 한 번 더 소모
 즉 10 밑으로 내려갈 수 없습니다.
 
 ```text
-OpenSearch ef_search=10 → Recall 0.93    ← 0.80, 0.90 도달 불가
-Milvus     ef=40        → Recall 0.90    ← 0.80 도달 불가
+OpenSearch ef_search=10 → 비교 Recall 0.9296    ← 0.80, 0.90 도달 불가
+Milvus     ef=40        → 비교 Recall 0.8959    ← 0.80 도달 불가
 ```
 
 이 경우 `ef`가 아니라 `M` / `ef_construction`을 낮춰야 하지만
 현재 두 값은 전 DB에서 16 / 128로 고정되어 튜닝 축에 없습니다.
 
 **결과적으로 "동일 Recall 비교"가 모든 목표에서 성립하지는 않습니다.**
-`recall_selection`이 `CLOSEST_AVAILABLE`인 행은 서로 비교할 수 없습니다.
+`recall_selection=CLOSEST_AVAILABLE`인 행은 서로 비교할 수 없습니다. 또한 Milvus처럼
+튜닝과 본 측정 사이 Recall이 흔들릴 수 있으므로 `WITHIN_TOLERANCE`라도
+`target_met=false`이면 직접 비교에서 제외합니다.
 
 ## 5. CPU와 메모리 수치의 비교 가능성이 낮습니다
 
@@ -108,9 +110,11 @@ Qdrant가 pgvector보다 빠르다.
 
 ```text
 본 테스트 환경(10,000건 / 1024차원 / 4 vCPU / 8 GiB / 동시성 10 / warm cache)에서
-Recall@10 0.95 ±0.01을 만족하는 설정 기준으로,
-무필터 질의의 p95가 Qdrant A ms, pgvector B ms였다.
+무필터 Recall@10 0.95 ±0.01을 본 측정에서도 만족한 단일 재구축 실행 기준으로,
+무필터 질의의 p95가 Qdrant 5.62 ms, pgvector 31.05 ms였다.
 ```
+
+이 수치는 2026-09-11 단일 실행이며 반복 재구축의 중앙값이 아니다.
 
 ## 관련 문서
 

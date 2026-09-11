@@ -26,6 +26,13 @@ manifest의 model digest와 SHA-256이 실험 데이터 동일성의 기준이�
 
 DB benchmark에서는 embedding 생성 시간을 latency에 포함하지 않는다.
 
+## Chunking 조건
+
+입력 코퍼스는 벤치마크 전에 이미 10,000개의 합성 chunk record로 만들어져 있다.
+따라서 이 저장소 안에서 실행되는 단일 chunking 알고리즘·고정 크기·overlap 값은 없으며
+`manifest.json`에 각각 해당 없음(`null`)으로 기록한다. 실제 입력의 `chunk_profile`
+(`short` / `medium` / `long`)과 최종 chunk 수 10,000건이 재현 조건이다.
+
 ## Query 유형
 
 - short_clear

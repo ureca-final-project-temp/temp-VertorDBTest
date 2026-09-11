@@ -24,6 +24,15 @@
 `id` / `documentId` / `chunkId` / `content` / `embedding`을 제외한 나머지 필드가
 전부 `metadata` 객체로 들어갑니다. 필터는 이 하위 키를 대상으로 합니다.
 
+### Chunking 재현 조건
+
+이 데이터셋은 애플리케이션이 원문을 다시 자르는 방식이 아니라 **사전에 생성된 합성 chunk
+10,000건**을 입력으로 사용합니다. 따라서 단일 chunking 알고리즘, 고정 chunk size,
+overlap은 해당 없음입니다. 대신 각 레코드의 `chunk_profile`
+(`short` / `medium` / `long`)과 최종 건수를 `data/manifest.json`에 고정합니다.
+실서비스 문서를 재청킹해 비교할 때에는 별도 manifest에 알고리즘·크기·overlap·최종 건수를
+반드시 기록해야 합니다.
+
 ## Query Set
 
 | 유형 | 개수 | 비율 |

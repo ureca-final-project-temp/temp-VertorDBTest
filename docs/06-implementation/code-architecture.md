@@ -48,6 +48,7 @@ com.myapp
 | CPU·메모리·디스크 샘플링 | `benchmark/ResourceCollector.java` |
 | 결과 JSON/CSV/SVG 출력 | `benchmark/ResultWriter.java` |
 | 재현 환경 수집 | `benchmark/BenchmarkEnvironmentCollector.java` |
+| PostgreSQL 원본 스냅샷 동기화 | `infrastructure/rdb/postgres/BenchmarkSourceOfTruthSynchronizer.java` |
 | 설정값 | `benchmark/BenchmarkProperties.java` |
 | 벡터 JSONL 파싱 | `dataset/VectorDatasetLoader.java`, `dataset/JsonlSupport.java` |
 | 질의 + 필터 로딩 | `dataset/QuerySetLoader.java` |
@@ -76,6 +77,7 @@ if (store == null) throw new IllegalStateException("No vector store is active. E
 
 - `domain`과 `port`는 특정 DB에 의존하지 않습니다.
 - Ground Truth는 `VectorStore`를 거치지 않습니다.
+- PostgreSQL Source of Truth 동기화와 Flyway migration은 검색 타이머 밖입니다.
 - 측정 타이머는 `store.search()`만 감쌉니다. 이 경계를 넓히지 않습니다.
 - `BenchmarkResult`는 record이며 필드 추가 시 `ResultWriter`의 CSV 헤더와 포맷을 함께 고칩니다.
 - 결과 파일에 쓰는 모든 수치는 실제 측정값입니다. 미지원은 `-1`, 해당 없음은 빈 값입니다.
@@ -95,10 +97,12 @@ if (store == null) throw new IllegalStateException("No vector store is active. E
 | `QuerySegmentTest` | 구간 집계, 빈 구간 |
 | `ResourceCollectorTest` | docker stats 단위 파싱, baseline 처리 |
 | `ResultWriterTest` | CSV 헤더/행 컬럼 수 일치 |
+| `QdrantIndexManagerTest` | exact-scan 대기 생략 경로에서도 payload index 검증 |
 | `VectorDatasetLoaderTest`, `QuerySetLoaderTest` | JSONL 필드 별칭, 필터 병합 |
 
-DB 어댑터는 실제 컨테이너가 필요해 단위 테스트에 포함되지 않습니다.
-smoke test로 검증합니다. [../04-quickstart/run-benchmark.md](../04-quickstart/run-benchmark.md)를 봅니다.
+DB 어댑터의 HTTP 계약 일부는 mock HTTP 단위 테스트로 검증하고, 실제 제품 API와 비동기
+준비 상태는 컨테이너 smoke/full benchmark로 검증합니다.
+[../04-quickstart/run-benchmark.md](../04-quickstart/run-benchmark.md)를 봅니다.
 
 ## 관련 문서
 

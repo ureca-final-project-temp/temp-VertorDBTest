@@ -74,6 +74,7 @@ hnsw_ef 1000 → 필터 질의 p95 126.64 ms    ← 12.5배 올렸는데 변화 
 **`ef`에 반응하지 않는 percentile은 HNSW 경로가 아니라는 신호입니다.**
 
 `awaitReady()`가 `payload_schema`를 확인하고 선언한 필드가 없으면 측정을 시작하지 않고 실패합니다.
+작은 컬렉션이라 indexed vector 대기를 생략하는 exact-scan 경로에서도 이 검증은 건너뛰지 않습니다.
 
 ```java
 throw new IllegalStateException("Qdrant payload index is missing for " + missing
@@ -89,7 +90,8 @@ throw new IllegalStateException("Qdrant payload index is missing for " + missing
 강제로 HNSW를 만들게 합니다.
 
 `awaitReady()`는 `indexed_vectors_count`가 전체 건수에 도달하고 status가 `green`이 될 때까지 기다립니다.
-단, 추정 벡터 크기가 `full_scan_threshold`보다 작으면 Qdrant가 의도적으로 exact를 쓰므로 대기를 건너뜁니다.
+단, 추정 벡터 크기가 `full_scan_threshold`보다 작으면 Qdrant가 의도적으로 exact를 쓰므로
+indexed vector 건수 대기만 건너뜁니다. payload index 존재 검사는 그대로 수행합니다.
 
 ### point id가 UUID여야 합니다
 

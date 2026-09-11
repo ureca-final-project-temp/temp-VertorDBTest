@@ -11,7 +11,7 @@ vector:
     base-url: ${QDRANT_URL:http://localhost:6333}
     api-key: ${QDRANT_API_KEY:}
     collection: ${QDRANT_COLLECTION:benchmark_chunks}
-    dimension: ${VECTOR_DIMENSION:384}
+    dimension: ${VECTOR_DIMENSION:1024}
     metric: ${VECTOR_METRIC:COSINE}
     hnsw-m: ${HNSW_M:16}
     ef-construction: ${HNSW_EF_CONSTRUCTION:128}

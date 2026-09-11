@@ -17,6 +17,18 @@
     "synthetic": true,
     "topic_count": 200
   },
+  "chunking": {
+    "input_unit": "pre_chunked_synthetic_records",
+    "algorithm": "not_applicable_dataset_is_pregenerated",
+    "chunk_size": null,
+    "chunk_overlap": null,
+    "final_chunk_count": 10000,
+    "profiles": [
+      "short",
+      "medium",
+      "long"
+    ]
+  },
   "queries": {
     "records": 300,
     "distribution": {

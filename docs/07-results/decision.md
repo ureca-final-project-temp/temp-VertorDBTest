@@ -2,7 +2,8 @@
 
 이 문서는 제품 홍보표가 아니라 1차 의사결정용 체크리스트다. 최종 선택은 반드시 이 저장소의 고정 데이터·고정 Recall 실험 결과로 결정한다.
 
-측정 수치는 [benchmark-results.md](benchmark-results.md), 그 수치의 유효성 검토는 [analysis.md](analysis.md)에 있다.
+무효 처리한 1차 측정 수치는 [benchmark-results.md](benchmark-results.md), 결함 수정 후 재실행 수치는
+[benchmark-results-rerun.md](benchmark-results-rerun.md), 유효성 검토는 [analysis.md](analysis.md)에 있다.
 
 | 항목 | pgvector | Qdrant | Weaviate | Milvus | OpenSearch |
 |---|---|---|---|---|---|
@@ -22,13 +23,14 @@
 1. PostgreSQL 단일 운영으로 목표 Recall의 p95/p99와 용량 요구를 만족하는지 본다. 만족하면 별도 동기화 계층을 추가할 이유부터 증명해야 한다.
 2. 필터를 포함한 실제 질의 분포로 다시 측정한다. ANN 뒤 필터링 또는 필터 선택도에 따라 결과 수와 Recall이 크게 달라질 수 있다.
 3. 장애 시 재구축 시간과 허용 RPO/RTO를 측정한다. 독립 Vector DB는 PostgreSQL 원본에서 idempotent하게 재적재할 수 있어야 한다.
-4. 평균이 아니라 동일 Recall의 p95/p99, QPS, peak memory를 비교한다.
+4. 평균이 아니라 동일한 **무필터 비교 Recall**의 무필터 p95/p99, QPS, peak memory를 비교한다.
 5. 예상 3년 데이터량, tenant 수, write/read 비율로 scale-out 필요성을 검증한다.
 
 ## 프로젝트에서 추가로 검증할 것
 
 - Qdrant payload index는 `vector.qdrant.payload-index-fields`로 적용했고 `awaitReady`가 존재를 검증한다. 남은 것은 tenant 전용 설정(`is_tenant`)과 shard key 시나리오다.
 - 필터 질의와 무필터 질의는 분리해 비교한다. 필터 질의가 소수면 합산 p95/p99는 ANN 꼬리가 아니라 필터 비용이 된다. 결과 파일의 `unfiltered_*`와 `filtered_*`를 각각 본다.
+- 직접 비교에는 `recall_selection=WITHIN_TOLERANCE`와 `target_met=true`를 모두 만족한 행만 사용한다. 튜닝과 본 측정 사이 drift를 무시하지 않는다.
 - pgvector filtered ANN은 필터 선택도별 결과 부족 여부와 iterative scan 설정을 확인해야 한다.
 - Weaviate는 선언한 filter property와 실제 JSONL metadata type이 일치해야 한다.
 - Milvus는 flush와 `indexedRows` 완료 후에만 측정해야 한다. 본 구현은 이 장벽을 포함한다.
@@ -45,4 +47,3 @@
 - [Milvus architecture](https://milvus.io/docs/architecture_overview.md)
 - [OpenSearch approximate k-NN](https://docs.opensearch.org/latest/vector-search/vector-search-techniques/approximate-knn/)
 - [OpenSearch hybrid search](https://docs.opensearch.org/latest/vector-search/ai-search/hybrid-search/index/)
-

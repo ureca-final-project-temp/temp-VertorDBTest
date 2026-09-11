@@ -23,9 +23,22 @@ class ResultWriterTest {
 
         List<String> lines = readCsv(directory);
         assertThat(lines).hasSize(2);
+        assertThat(columns(lines.getFirst())).hasSize(42);
         assertThat(columns(lines.get(1))).hasSize(columns(lines.getFirst()).size());
         assertThat(lines.getFirst()).contains("filtered_p95_ms", "unfiltered_p95_ms", "unfiltered_recall");
+        assertThat(lines.getFirst()).contains("comparison_recall");
         assertThat(lines.get(1)).contains("90.000000", "7.000000");
+    }
+
+    @Test
+    void plotsUnfilteredRecallAgainstUnfilteredLatency(@TempDir Path directory) throws Exception {
+        writer.write(List.of(result(new QuerySegment(150, 0.71, 40, 38, 90, 120),
+                new QuerySegment(1350, 0.96, 4, 3.5, 7, 12))), directory);
+
+        String chart = Files.readString(directory.resolve("charts/recall-latency-latest.svg"));
+
+        assertThat(chart).contains("unfiltered Recall@K", "comparison recall 0.9600", "cy=\"62.00\"");
+        assertThat(chart).doesNotContain("comparison recall 0.9412");
     }
 
     @Test
@@ -52,7 +65,9 @@ class ResultWriterTest {
     }
 
     private BenchmarkResult result(QuerySegment filtered, QuerySegment unfiltered) {
-        return new BenchmarkResult("qdrant", "hnsw", 0.95, 0.9412, 0.01, true, "WITHIN_TOLERANCE", 0.9412,
+        Double comparisonRecall = unfiltered.recall() == null ? 0.9412 : unfiltered.recall();
+        return new BenchmarkResult("qdrant", "hnsw", 0.95, 0.9412, comparisonRecall,
+                0.01, true, "WITHIN_TOLERANCE", 0.9412,
                 8.1, 3.6, 12.0, 40.0, 1820.5, filtered, unfiltered,
                 131.6, 102_000_000L, 4_096L, -1L, 5_143L, 3_891L, 10_000, 1_500, 10, 10, 1, 5,
                 Map.of("m", 16), Map.of("hnsw_ef", 400), Map.of("metric", "COSINE"), Instant.now());

@@ -9,7 +9,7 @@ import java.util.List;
 
 @ConfigurationProperties(prefix = "benchmark")
 public class BenchmarkProperties {
-    private Path documentVectors = Path.of("data/embeddings/documents-vectors.jsonl");
+    private Path documentVectors = Path.of("data/embeddings/document-vectors.jsonl");
     private Path queryDefinitions = Path.of("data/queries/queries.jsonl");
     private Path queryVectors = Path.of("data/embeddings/query-vectors.jsonl");
     private Path resultDirectory = Path.of("benchmark-result");

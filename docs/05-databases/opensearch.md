@@ -68,11 +68,11 @@ POST /benchmark-chunks/_search
 
 ### 낮은 목표 Recall에 도달할 수 없습니다
 
-최소 후보 `ef_search=10`에서 이미 Recall 0.93이 나옵니다.
+2026-09-11 최종 코드 재실행에서는 최소 후보 `ef_search=10`에서 이미 무필터 비교 Recall 0.9296이 나왔습니다.
 
 ```text
-ef_search=10 → Recall 0.9303    ← 목표 0.80, 0.90 모두 도달 불가
-ef_search=20 → Recall 0.9413
+ef_search=10 → 비교 Recall 0.9296    ← 목표 0.80, 0.90 모두 도달 불가
+ef_search=40 → 비교 Recall 0.9493    ← 목표 0.95 선택
 ```
 
 후보는 `candidate >= topK` 조건으로 걸러지므로 10 밑으로 내려갈 수 없습니다.
@@ -83,8 +83,8 @@ ef_search=20 → Recall 0.9413
 
 ### 메모리 수치가 사용량이 아닙니다
 
-`-Xms4g -Xmx4g`로 JVM heap을 선점하므로 `peak_memory_bytes`는 약 4.7 GiB로 고정됩니다.
-이 값을 pgvector의 165 MiB와 나란히 두고 "메모리를 많이 쓴다"고 읽으면 안 됩니다.
+`-Xms4g -Xmx4g`로 JVM heap을 선점하므로 재실행의 `peak_memory_bytes`는 약 5.0 GiB였습니다.
+이 값을 pgvector의 약 193~195 MiB와 나란히 두고 실제 working set 차이라고 읽으면 안 됩니다.
 
 ### metadata가 dynamic mapping입니다
 

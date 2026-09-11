@@ -57,6 +57,11 @@ double recall = recallCalculator.recallAtK(...);                              //
 ## Source of Truth
 
 원본 문서와 청크는 PostgreSQL에 보관합니다(`V1__source_of_truth.sql`, Spring Data JDBC).
+`BenchmarkSourceOfTruthSynchronizer`가 벡터 JSONL을 200개 원문과 10,000개 청크로 동기화하고,
+`benchmark_dataset_state`에 입력 SHA-256과 건수를 기록합니다. 동일 스냅샷이면 재적재하지 않으며,
+불일치한 상태에서 `rebuildAndLoad=false`이면 실행을 거부합니다. Flyway는 기존 비어 있지 않은
+개발 볼륨도 baseline 0에서 V1·V2를 적용합니다.
+
 전용 Vector DB 프로필에서도 PostgreSQL이 함께 뜨지만 **검색 요청 경로와 자원 측정 대상에서는 제외**합니다.
 pgvector 프로필에서만 PostgreSQL이 측정 대상입니다.
 
@@ -71,6 +76,7 @@ pgvector 프로필에서만 PostgreSQL이 측정 대상입니다.
 | 지연시간 수집(필터/무필터 분리) | `benchmark/LatencyCollector.java` |
 | 자원 샘플링 | `benchmark/ResourceCollector.java` |
 | 결과 파일 출력 | `benchmark/ResultWriter.java` |
+| PostgreSQL 원본 스냅샷 동기화 | `infrastructure/rdb/postgres/BenchmarkSourceOfTruthSynchronizer.java` |
 | DB 중립 계약 | `port/VectorStore.java`, `port/VectorIndexManager.java` |
 | DB별 구현 | `infrastructure/vector/<db>/` |
 

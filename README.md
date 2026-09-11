@@ -17,8 +17,8 @@ ANN Recall@10을 기준으로 검색 품질을 맞춘 뒤
 - QPS
 - CPU
 - RAM
-- Index Build Time
-- Disk Usage
+- Time-to-ready (drop/create + 적재 + 준비 완료)
+- 검색 중 Disk write / 제품이 제공하는 index size
 
 최종 평가는 단순히 "가장 빠른 DB"를 선정하는 것이 아니라,
 
@@ -27,22 +27,22 @@ ANN Recall@10을 기준으로 검색 품질을 맞춘 뒤
 
 를 기준으로 합니다.
 
-### 최종 결과
+### 재실행 결과 요약
 
-> 아직 실험 진행 중
+측정 결함을 수정한 뒤 2026-09-11에 1회 재실행했습니다. 아래 표는 목표 0.95 행의
+**무필터 비교 Recall과 무필터 p95**를 사용합니다. Milvus는 튜닝 단계에서는 범위에
+들었지만 본 측정 Recall이 크게 변해 직접 비교에서 제외합니다.
 
-실험 완료 후 다음 형식으로 요약합니다.
+| DB | 비교 Recall@10 | 범위 충족 | 무필터 p95 ms | QPS | RAM MiB | 평가 |
+|---|---:|:---:|---:|---:|---:|---|
+| pgvector | 0.9489 | O | 31.05 | 1,485.78 | 194.6 | 직접 비교 가능 |
+| Qdrant | 0.9522 | O | 5.62 | 2,751.52 | 101.3 | 직접 비교 가능 |
+| Weaviate | 0.9515 | O | 31.29 | 601.10 | 294.3 | 직접 비교 가능 |
+| Milvus | 0.7422 | X | 30.21 | 1,103.26 | 710.9 | 본 측정 drift, 제외 |
+| OpenSearch | 0.9493 | O | 16.75 | 1,696.75 | 5,123.1 | 직접 비교 가능 |
 
-| DB | Recall@10 | p95 | QPS | RAM | 평가 |
-|---|---:|---:|---:|---:|---|
-| pgvector | TBD | TBD | TBD | TBD | TBD |
-| Qdrant | TBD | TBD | TBD | TBD | TBD |
-| Weaviate | TBD | TBD | TBD | TBD | TBD |
-| Milvus | TBD | TBD | TBD | TBD | TBD |
-| OpenSearch | TBD | TBD | TBD | TBD | TBD |
-
-1차 실행은 완료했으나 측정 결함 두 건을 확인해 재실행 대기 중입니다.
-경위와 수정 내용은 [docs/07-results/analysis.md](docs/07-results/analysis.md)에 있습니다.
+상세 결과와 해석은 [docs/07-results/benchmark-results-rerun.md](docs/07-results/benchmark-results-rerun.md),
+1차 실행이 무효가 된 경위는 [docs/07-results/analysis.md](docs/07-results/analysis.md)에 있습니다.
 
 ## 실험 한눈에 보기
 
@@ -73,6 +73,7 @@ RAG 서비스에서 Vector DB를 고를 때 흔히 보는 벤치마크는 세 �
 | 검색 품질 | Exact Top-K를 Ground Truth로 계산하고, Recall@10이 목표 구간에 들도록 DB별 탐색 파라미터를 자동 조정 |
 | 자원 | 대상 합계 4 vCPU / 8 GiB, swap 금지. 측정 전 `docker inspect`로 실제 상한을 검증하고 다르면 중단 |
 | 입력 | 동일한 BGE-M3 1024차원 벡터 파일을 전 DB에 재사용하고 SHA-256으로 고정 |
+| 원본 | PostgreSQL에 원문 200건·청크 10,000건을 적재하고 입력 SHA-256과 건수를 검증 |
 
 측정 구간은 `VectorStore.search()` 호출만 감쌉니다. LLM 및 embedding 생성 시간은 포함하지 않습니다.
 
@@ -153,7 +154,7 @@ CSV에 `database=qdrant` 행이 1개 이상 있고 `actual_recall`이 0보다 �
 
 ## Status
 
-실험 진행 중. 하네스는 동작하며 단위 테스트를 통과합니다.
+측정 결함 수정 후 1회 재실행을 완료했습니다. 최종 선정 전 반복 실행은 남아 있습니다.
 
 ```powershell
 .\gradlew.bat test
@@ -166,4 +167,5 @@ docker compose --profile qdrant --profile weaviate --profile milvus --profile op
 | 5개 DB 어댑터 | 구현 완료 |
 | 자동 Recall 튜닝 | 구현 완료 |
 | 1차 본실험 | 완료, 측정 결함으로 무효 |
-| 재실행 | 대기 중 |
+| 결함 수정 후 재실행 | 1회 완료 |
+| 반복 재구축 검증 | 대기 중 |
