@@ -27,8 +27,54 @@ OpenSearch의 Recall@10·latency·QPS·자원·인덱스 준비 비용을 비교
 각 조합은 Recall 0.90/0.95 두 행을 가집니다. OpenSearch JVector는 KNN 플러그인과 같은 노드에서 공존하지 않으므로 별도 이미지·컨테이너로 실행합니다.
 
 ## 공정성 계약
-
 | 항목 | 고정값 또는 검증 방식 |
+를 기준으로 합니다.
+
+### 재실행 결과 요약
+
+측정 결함을 수정한 뒤 2026-09-11에 1회 재실행했습니다. 아래 표는 목표 0.95 행의
+**무필터 비교 Recall과 무필터 p95**를 사용합니다. Milvus는 튜닝 단계에서는 범위에
+들었지만 본 측정 Recall이 크게 변해 직접 비교에서 제외합니다.
+
+| DB | 비교 Recall@10 | 범위 충족 | 무필터 p95 ms | QPS | RAM MiB | 평가 |
+|---|---:|:---:|---:|---:|---:|---|
+| pgvector | 0.9489 | O | 31.05 | 1,485.78 | 194.6 | 직접 비교 가능 |
+| Qdrant | 0.9522 | O | 5.62 | 2,751.52 | 101.3 | 직접 비교 가능 |
+| Weaviate | 0.9515 | O | 31.29 | 601.10 | 294.3 | 직접 비교 가능 |
+| Milvus | 0.7422 | X | 30.21 | 1,103.26 | 710.9 | 본 측정 drift, 제외 |
+| OpenSearch | 0.9493 | O | 16.75 | 1,696.75 | 5,123.1 | 직접 비교 가능 |
+
+상세 결과와 해석은 [docs/07-results/benchmark-results-rerun.md](docs/07-results/benchmark-results-rerun.md),
+1차 실행이 무효가 된 경위는 [docs/07-results/analysis.md](docs/07-results/analysis.md)에 있습니다.
+
+<img width="986" height="512" alt="image" src="https://github.com/user-attachments/assets/7182ad53-7801-4338-aaa5-d9237652068a" />
+
+
+## 실험 한눈에 보기
+
+```text
+BGE-M3
+  → 1024-dimensional vector
+  → Same Dataset
+  → Same Query Vector
+  → Exact Top-K
+  → ANN Top-K
+  → Recall@10
+  → Latency / QPS / CPU / RAM 비교
+```
+
+## 왜 비교하는가
+
+RAG 서비스에서 Vector DB를 고를 때 흔히 보는 벤치마크는 세 가지 이유로 그대로 쓰기 어렵습니다.
+
+- **검색 품질이 다른 상태의 속도를 비교합니다.** ANN은 탐색 폭을 줄이면 항상 빨라지므로,
+  Recall을 맞추지 않은 latency 비교는 순위를 만들어낼 수 있습니다.
+- **자원 조건이 다릅니다.** CPU와 메모리 상한이 다르면 같은 지표를 나란히 둘 수 없습니다.
+- **embedding 조건이 다릅니다.** 모델과 차원이 다르면 인덱스 난이도 자체가 달라집니다.
+
+이 저장소는 세 가지를 모두 고정합니다.
+
+| 고정 대상 | 방법 |
 |---|---|
 | 벡터 | 로컬 Ollama `bge-m3`, dense 1024차원 |
 | 거리 | cosine |
