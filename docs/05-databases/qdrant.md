@@ -1,6 +1,6 @@
 # Qdrant
 
-전용 Vector DB. REST query API로 접근합니다.
+Native HNSW(T05)를 측정하는 전용 Vector DB입니다. REST query API로 접근합니다.
 
 ## 설정
 
@@ -59,19 +59,18 @@ POST /collections/benchmark_chunks/points/query
 
 ## Sharp edges
 
-### payload index가 없으면 filtered 검색이 full scan이 됩니다
+### 선언한 payload index가 준비돼 있어야 합니다
 
-Qdrant는 필터 대상 필드에 payload index가 있어야 filtered HNSW를 사용합니다.
-없으면 필터를 전체 점수 스캔으로 평가합니다.
+이 하네스는 필터용 payload index를 생성하고 준비 상태를 확인합니다. 누락되면 의도한 필터 검색 조건과 다르므로 측정을 시작하지 않습니다. 실제 검색 경로는 필터 선택도와 내부 실행 계획의 영향도 받습니다.
 
-증상:
+과거 1차 실행에서 관측한 증상이며 이번 372개 sweep 수치와는 구분합니다.
 
 ```text
 hnsw_ef  80 → 필터 질의 p95 130.74 ms
 hnsw_ef 1000 → 필터 질의 p95 126.64 ms    ← 12.5배 올렸는데 변화 없음
 ```
 
-**`ef`에 반응하지 않는 percentile은 HNSW 경로가 아니라는 신호입니다.**
+특정 percentile이 `ef`에 반응하지 않으면 payload index와 요청 파라미터를 확인합니다. latency만으로 실제 검색 경로를 확정하지 않습니다.
 
 `awaitReady()`가 `payload_schema`를 확인하고 선언한 필드가 없으면 측정을 시작하지 않고 실패합니다.
 작은 컬렉션이라 indexed vector 대기를 생략하는 exact-scan 경로에서도 이 검증은 건너뛰지 않습니다.
@@ -93,7 +92,7 @@ throw new IllegalStateException("Qdrant payload index is missing for " + missing
 단, 추정 벡터 크기가 `full_scan_threshold`보다 작으면 Qdrant가 의도적으로 exact를 쓰므로
 indexed vector 건수 대기만 건너뜁니다. payload index 존재 검사는 그대로 수행합니다.
 
-### point id가 UUID여야 합니다
+### 내부 point id를 원본 id로 복원합니다
 
 Qdrant는 point id로 UUID 또는 정수만 받습니다.
 `chunk-000-00` 같은 문자열은 `UUID.nameUUIDFromBytes()`로 결정론적 변환합니다.
@@ -122,6 +121,16 @@ Invoke-RestMethod http://localhost:6333/collections/benchmark_chunks |
 - `infrastructure/vector/qdrant/QdrantVectorStore.java`
 - `infrastructure/vector/qdrant/QdrantIndexManager.java`
 - `infrastructure/vector/qdrant/QdrantProperties.java`
+
+## 2026-09-11 전체 sweep 실측
+
+[새 실험 보고서](../07-results/sweep-results-20260911.md)의 이 DB 측정은 다음과 같습니다. 각 범위는 **모든 검색 파라미터와 세 재구축 회차**를 포함합니다. 최소 p95와 최대 Recall이 같은 점이라는 뜻은 아닙니다.
+
+| 구성 | 실제 검색 그리드 | 점 수 | Recall@10 범위 | 전체 p95 ms 범위 |
+|---|---|---:|---:|---:|
+| T05 / Native / hnsw | hnsw_ef: 10, 20, 40, 80, 120, 200, 400, 800, 1000 | 27 | 0.880928–0.983505 | 3.566–22.513 |
+
+모든 점을 [전체 산포도](../07-results/assets/sweep-20260911-220549/scatter-recall-latency-all-372.svg)에 표시했습니다. 같은 파라미터의 반복 변동과 CPU·RAM·QPS는 [반복 집계](../07-results/assets/sweep-20260911-220549/vector-db-summary.csv)와 [원시값](../07-results/assets/sweep-20260911-220549/all-measurements.json)을 함께 확인합니다. Recall 0.90·0.95는 참고선이며 낮은 품질의 점도 제거하지 않습니다.
 
 ## 참고
 

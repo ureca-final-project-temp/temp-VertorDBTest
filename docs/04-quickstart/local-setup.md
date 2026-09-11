@@ -15,7 +15,7 @@
 | Ollama | `bge-m3:latest` 설치 | `ollama list` |
 
 사용 포트: 8080(앱), 5432(PostgreSQL), 6333(Qdrant), 18080(Weaviate),
-19530·9091(Milvus), 9200(OpenSearch), 11434(Ollama)
+19530·9091(Milvus), 9200(OpenSearch), 19200(OpenSearch JVector), 11434(Ollama)
 
 ## 1. 저장소 준비
 

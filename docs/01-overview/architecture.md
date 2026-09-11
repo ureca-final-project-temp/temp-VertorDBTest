@@ -7,7 +7,7 @@
 ```text
 BenchmarkController  ─ POST /api/benchmarks/run
         ↓
-BenchmarkRunner      ─ 시나리오 실행, 튜닝, 집계
+BenchmarkRunner      ─ 전체 파라미터·반복 실행, 점별 저장
         ↓
 VectorStore (port)   ─ DB 중립 계약
         ↓
@@ -41,18 +41,18 @@ double recall = recallCalculator.recallAtK(...);                              //
 - DB의 검색 실행
 - 응답 역직렬화
 
-타이머 밖에 있는 것: Controller, embedding, Ground Truth 계산, Recall 계산, 자원 샘플링, 파라미터 튜닝.
+타이머 밖에 있는 것: Controller, embedding, Ground Truth 계산, Recall 계산, 자원 샘플링, 파라미터 적용과 추가 진단.
 
 > 직렬화 비용이 DB마다 다르다는 점은 결과 해석에 영향을 줍니다.
 > [../03-benchmark-design/limitations.md](../03-benchmark-design/limitations.md)를 봅니다.
 
 ## 자원 샘플링
 
-`ResourceCollector`가 별도 데몬 스레드에서 500ms마다 `docker stats --no-stream`을 실행합니다.
-검색 스레드와 분리되어 있어 지연시간에 포함되지 않습니다.
+`ResourceCollector`가 별도 데몬 스레드에서 이전 명령 완료 후 500ms 간격으로 `docker stats --no-stream`을 실행합니다.
+수집 호출을 검색 요청 타이머에 직접 더하지 않습니다. 다만 같은 호스트의 수집 비용이 성능에 간접 영향을 줄 가능성까지 제거한 실험은 아닙니다.
 
 - 측정 시작 직전 baseline 1회 — Block I/O write의 기준점으로만 사용합니다(유휴 CPU가 평균에 섞이지 않도록).
-- 측정 종료 직후 동기 샘플 1회 — 측정 구간이 스케줄 주기보다 짧은 경우를 보완합니다.
+- 검색 구간 안에서 수집을 시작하고 마친 표본만 집계합니다. 측정 종료 후 유휴 표본을 더하지 않습니다. 검색을 최소 5초 유지하고 실제 시간과 표본 수를 저장합니다.
 
 ## Source of Truth
 
@@ -69,15 +69,20 @@ pgvector 프로필에서만 PostgreSQL이 측정 대상입니다.
 
 | 개념 | 파일 |
 |---|---|
-| 시나리오 실행·튜닝·집계 | `benchmark/BenchmarkRunner.java` |
+| 전체 파라미터·반복 실행 | `benchmark/BenchmarkRunner.java` |
 | Exact Top-K | `benchmark/ExactSearchEngine.java` |
 | Recall@K | `benchmark/RecallCalculator.java` |
-| 목표 Recall 후보 선택 | `benchmark/RecallTargetSelector.java` |
+| 전체 검색 파라미터 그리드 확장 | `benchmark/SearchParameterSweep.java` |
 | 지연시간 수집(필터/무필터 분리) | `benchmark/LatencyCollector.java` |
 | 자원 샘플링 | `benchmark/ResourceCollector.java` |
 | 결과 파일 출력 | `benchmark/ResultWriter.java` |
+| 동일 파라미터 반복 집계 | `benchmark/BenchmarkSummary.java` |
+| 전체 실측 산포도 | `benchmark/RecallLatencyPlot.java` |
+| 저장된 JSON의 산포도 재생성 | `tools/BenchmarkChartGenerator.java` |
 | PostgreSQL 원본 스냅샷 동기화 | `infrastructure/rdb/postgres/BenchmarkSourceOfTruthSynchronizer.java` |
 | DB 중립 계약 | `port/VectorStore.java`, `port/VectorIndexManager.java` |
 | DB별 구현 | `infrastructure/vector/<db>/` |
+
+이번 실행에서 이 경로로 저장한 372개 점과 검증 근거는 [sweep 결과 보고서](../07-results/sweep-results-20260911.md)에 있습니다.
 
 더 자세한 코드 지도는 [../06-implementation/code-architecture.md](../06-implementation/code-architecture.md)에 있습니다.

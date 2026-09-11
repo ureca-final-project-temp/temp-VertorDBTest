@@ -53,6 +53,16 @@ tasks.named('test') {
 	useJUnitPlatform()
 }
 
+tasks.register('renderBenchmarkChart', JavaExec) {
+	group = 'benchmark'
+	description = 'Plot every saved measurement with p95 on X and Recall on Y; preserve historical inputs.'
+	classpath = sourceSets.main.runtimeClasspath
+	mainClass = 'com.myapp.tools.BenchmarkChartGenerator'
+	doFirst {
+		args providers.gradleProperty('chartInput').get(), providers.gradleProperty('chartOutput').get()
+	}
+}
+
 tasks.register('generateEmbeddings', JavaExec) {
 	group = 'benchmark'
 	description = 'Generate resumable BGE-M3 document and query embeddings through local Ollama.'

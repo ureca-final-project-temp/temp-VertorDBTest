@@ -22,13 +22,13 @@ benchmark:
   document-vectors: ${DOCUMENT_VECTORS:data/embeddings/document-vectors.jsonl}
   query-definitions: ${QUERY_DEFINITIONS:data/queries/queries.jsonl}
   query-vectors: ${QUERY_VECTORS:data/embeddings/query-vectors.jsonl}
-  result-directory: ${BENCHMARK_RESULT_DIR:benchmark-result}
+  result-directory: ${BENCHMARK_RESULT_DIR:benchmark-result/sweep-primary}
   metric: ${VECTOR_METRIC:COSINE}
   container-names: []
   upsert-batch-size: ${UPSERT_BATCH_SIZE:256}
-  auto-tune-candidates: [10, 20, 40, 80, 120, 200, 400, 800, 1000]
+  search-parameter-values: [10, 20, 40, 80, 120, 200, 400, 800, 1000]
   calibration-query-count: ${CALIBRATION_QUERY_COUNT:100}
-  target-recall-tolerance: ${TARGET_RECALL_TOLERANCE:0.01}
+  minimum-measurement-time-ms: ${MINIMUM_MEASUREMENT_TIME_MS:5000}
   drift-diagnostic-repetitions: ${DRIFT_DIAGNOSTIC_REPETITIONS:3}
   drift-threshold: ${DRIFT_THRESHOLD:0.05}
   resource-budget-cpu: ${BENCHMARK_RESOURCE_CPU_BUDGET:4.0}

@@ -1,6 +1,6 @@
 # Recall@K
 
-이 실험에서 **검색 품질을 맞추는 기준**입니다.
+이 실험에서 **Exact Top-K를 얼마나 재현했는지 나타내는 검색 품질 지표**입니다.
 
 ## 정의
 
@@ -25,10 +25,39 @@ Recall@10 = 8 / 10 = 0.8
 
 ```java
 int denominator = Math.min(k, exact.size());
-if (denominator == 0) return 1.0;
 ```
 
-exact 결과가 0개면 "찾을 게 없었다"이므로 1.0으로 처리합니다.
+## exact 정답이 0개인 질의는 Recall에서 제외합니다
+
+필터가 어떤 문서와도 매칭되지 않으면 재현할 순위 자체가 없습니다. 이런 질의를 Recall 평균에
+1.0으로 섞으면 두 가지 문제가 생깁니다.
+
+- **점수가 부풀려집니다.** 제공 데이터의 evaluation 필터 질의 20개 중 6개가 여기 해당해,
+  1,000요청 측정 단위의 필터 검색 100건 중 30건이 무조건 만점이 됩니다. 필터 Recall `1.0000`의 30%가
+  측정이 아니라 규칙이 만든 값입니다.
+- **필터 결함을 놓칩니다.** 매칭되는 문서가 없는데 DB가 행을 반환하면 그건 필터 버그인데,
+  1.0으로 채점하면 드러나지 않습니다.
+
+그래서 이런 질의는 Recall 평균에서 빼고 **빈 결과를 반환했는지 별도 기록**합니다. 이 검사로 전체 측정 점을 제거하지 않습니다.
+
+```java
+if (recallCalculator.hasGroundTruth(exact)) {
+    scores.recordScored(recallCalculator.recallAtK(exact, approximate, topK));
+} else {
+    scores.recordEmptyGroundTruth(recallCalculator.returnedNothing(approximate));
+}
+```
+
+결과 파일에 구간별로 세 값이 남습니다.
+
+| 컬럼 | 의미 |
+|---|---|
+| `*_scored_queries` | Recall 평균에 실제로 들어간 검색 수 |
+| `*_empty_ground_truth_queries` | exact 정답이 비어 있어 제외된 검색 수 |
+| `*_empty_ground_truth_violations` | 그중 행을 반환한 위반 검색 수 |
+
+`*_recall`은 `*_scored_queries`에 대한 평균입니다. `*_empty_ground_truth_violations`가 0이 아니면
+그 제품의 필터가 exact 검색과 다른 문서 집합을 보고 있다는 뜻이므로 Recall보다 먼저 확인합니다.
 
 ## Recall이 아닌 것
 
@@ -39,56 +68,22 @@ embedding이 나쁘면 exact 검색 결과 자체가 엉망이고, ANN이 그걸
 의미 품질은 `data/qrels.tsv`로 따로 평가해야 하며, 그 지표는 Vector DB가 아니라
 embedding과 chunking 품질의 영향을 함께 받습니다.
 
-## 목표 구간
+## 품질 참고선과 전체 측정
 
-| 목표 | 성격 |
-|---|---|
-| 0.90 | 실무에서 자주 쓰는 균형점 |
-| 0.95 | 품질 우선. 대부분 정답을 회수 |
+Recall@10 0.90과 0.95는 품질 참고 수준입니다. 허용 범위와 합격·탈락 판정으로 사용하지 않습니다. 검색 파라미터를 바꿀 때마다 Recall·latency·QPS·CPU·RAM을 측정하고 전부 보존합니다.
 
-허용오차는 각 목표의 **±0.01**입니다.
+산포도의 X축은 전체 evaluation p95, Y축은 전체 `actual_recall`입니다. 0.90과 0.95는 수평 참고선입니다. `comparison_recall`은 무필터 세부 분석용 보조값으로 남습니다.
 
-주 비교는 evaluation 200개 중 필터가 없는 질의의 Recall을 사용합니다. 결과의
-`comparison_recall`이 그 값이며, evaluation 필터를 포함한 `actual_recall`은 혼합 참고값입니다.
+가령 ef=64의 Recall 0.943과 ef=128의 Recall 0.961은 모두 유효한 점입니다. 0.95 이상 영역을 설명할 대표값으로 0.961을 골라도 0.943은 전체 분석에 남습니다. 최저 파라미터에서 이미 0.95를 넘는 구성도 그대로 측정하며, 참고선에 맞추려고 품질을 낮출 필요가 없습니다.
 
-보조 목표 0.70과 0.99는 주 비교표에 섞지 않고 필요할 때 별도로 실행합니다
-(`data/benchmark-request-auxiliary.json`).
-
-## 선택 방식 표기
-
-결과의 `calibration_selection` 컬럼이 calibration에서 그 설정을 어떻게 얻었는지 알려줍니다.
-
-| 값 | 의미 | 비교에 사용 |
-|---|---|---|
-| `WITHIN_TOLERANCE` | 튜닝에서 목표 ±0.01 안에 드는 후보를 찾음 | `target_met=true`일 때만 O |
-| `CLOSEST_AVAILABLE` | 구간에 드는 후보가 없어 가장 가까운 값을 선택 | **X** |
-| `EXPLICIT_PARAMETERS` | 사용자가 검색 파라미터를 직접 지정 | 조건부 |
-
-`CLOSEST_AVAILABLE` 행끼리, 또는 그 행과 `WITHIN_TOLERANCE` 행을 나란히 두고
-"어느 DB가 빠르다"고 말하면 안 됩니다. 서로 다른 Recall의 속도를 비교하는 것이기 때문입니다.
-calibration과 evaluation 값이 달라질 수 있으므로 `calibration_selection`뿐 아니라 `target_met`도
-반드시 확인합니다.
-
-## 목표를 못 맞추는 경우
-
-후보 사다리가 기하급수(`10, 20, 40, 80, ...`)라서 ±0.01 밴드를 지나칠 수 있습니다.
-더 근본적으로, **최소 후보에서 이미 목표를 넘어버리는** DB가 있습니다.
-
-```text
-OpenSearch ef_search=10  → 비교 Recall 0.9296   ← 0.80도 0.90도 도달 불가
-```
-
-후보는 `candidate >= topK` 조건으로 걸러지므로 10 밑으로 내려갈 수 없습니다.
-이 경우 `ef`가 아니라 `M` / `ef_construction`을 낮춰야 합니다.
-
-현재 이 부분은 미해결입니다. [../03-benchmark-design/limitations.md](../03-benchmark-design/limitations.md)를 봅니다.
-
+반복의 목적은 같은 파라미터에서 latency·QPS·CPU·RAM의 변동을 확인하는 것입니다. Recall도 실제 관측값과 함께 남기지만 그 값으로 반복을 통과·탈락시키지 않습니다. 파라미터가 커졌는데 Recall이 내려가도 보정하거나 버리지 않고 실제 변동으로 표시합니다.
 ## 필터별 Recall
 
 결과에는 `filtered_recall`과 `unfiltered_recall`이 따로 기록됩니다.
 
-`filtered_recall`이 `unfiltered_recall`보다 뚜렷이 낮으면,
-ANN으로 뽑은 뒤 필터를 적용하는 post-filtering 때문에 Top-K를 못 채우고 있다는 신호입니다.
+`filtered_recall`이 `unfiltered_recall`보다 낮으면 필터 경로와 반환 건수를 확인합니다. post-filtering, 탐색 폭, 필터 처리 방식 등이 원인 후보이며 두 Recall 값만으로 원인을 확정하지 않습니다.
+
+이번 evaluation 200개 중 180개는 무필터, 20개는 필터 질의입니다. 정답이 빈 필터 질의 6개를 제외한 194개가 한 번의 질의 집합 실행에서 Recall 평균에 들어갑니다. 지연과 QPS는 200개 모두를 포함합니다. 최소 5초를 채우기 위한 실제 요청 수는 점마다 다르므로 저장된 `query_executions`와 `*_scored_queries`를 확인합니다.
 
 ## 관련 문서
 

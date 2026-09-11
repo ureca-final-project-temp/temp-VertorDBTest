@@ -8,6 +8,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class ResourceCollectorTest {
     @Test
+    void excludesCapturesOverlappingWarmupOrPostMeasurementIdleTime() {
+        var idle = new ResourceCollector.Snapshot(0.01, 100, 1000);
+        var busy = new ResourceCollector.Snapshot(180, 200, 2000);
+        var measured = ResourceCollector.Measurement.withinWindow(List.of(
+                new ResourceCollector.TimedSnapshot(idle, 90, 110),
+                new ResourceCollector.TimedSnapshot(busy, 110, 190),
+                new ResourceCollector.TimedSnapshot(idle, 190, 210)), 100, 200);
+        assertThat(measured).containsExactly(busy);
+        var usage = ResourceCollector.Measurement.summarize(idle, measured);
+        assertThat(usage.averageCpuPercent()).isEqualTo(180);
+        assertThat(usage.samples()).isEqualTo(1);
+    }
+
+    @Test
     void parsesDockerDecimalAndBinaryUnits() {
         assertThat(ResourceCollector.Measurement.parseBytes("12.5MB")).isEqualTo(12_500_000L);
         assertThat(ResourceCollector.Measurement.parseBytes("2MiB")).isEqualTo(2_097_152L);

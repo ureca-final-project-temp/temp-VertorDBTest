@@ -8,6 +8,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -15,11 +17,15 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Locale;
+import java.util.UUID;
 
 public class ResultWriter {
-    private static final String CSV_HEADER = "test_id,run_number,database,engine,index,target_recall,actual_recall,comparison_recall,recall_tolerance,target_met,calibration_selection,calibration_recall,average_ms,p50_ms,p95_ms,p99_ms,qps,"
+    private static final String PROTOCOL = "search-parameter-sweep-v1";
+    private static final String CSV_HEADER = "test_id,run_number,database,engine,index,actual_recall,comparison_recall,average_ms,p50_ms,p95_ms,p99_ms,qps,measurement_time_ms,resource_samples,"
             + "filtered_queries,filtered_recall,filtered_average_ms,filtered_p50_ms,filtered_p95_ms,filtered_p99_ms,"
+            + "filtered_scored_queries,filtered_empty_ground_truth_queries,filtered_empty_ground_truth_violations,"
             + "unfiltered_queries,unfiltered_recall,unfiltered_average_ms,unfiltered_p50_ms,unfiltered_p95_ms,unfiltered_p99_ms,"
+            + "unfiltered_scored_queries,unfiltered_empty_ground_truth_queries,unfiltered_empty_ground_truth_violations,"
             + "cpu_average_percent,cpu_max_percent,ram_average_bytes,ram_max_bytes,disk_write_bytes,index_size_bytes,time_to_index_ready_ms,upsert_ms,vector_count,query_executions,concurrency,top_k,warmup_iterations,measurement_iterations,stability_verified,stability_diagnostics,index_parameters,search_parameters,environment,measured_at\n";
     private final ObjectMapper objectMapper;
 
@@ -27,8 +33,37 @@ public class ResultWriter {
         this.objectMapper = objectMapper;
     }
 
+    public synchronized void prepareDirectory(Path directory) {
+        try {
+            Files.createDirectories(directory);
+            Path marker = directory.resolve("protocol.txt");
+            Path csv = directory.resolve("csv/vector-db-result.csv");
+            if (Files.exists(csv) && !Files.readString(csv).startsWith(CSV_HEADER)) {
+                throw new IllegalStateException("Existing CSV uses the old protocol; choose a new result directory: " + directory);
+            }
+            if (Files.exists(marker)) {
+                if (!Files.readString(marker).trim().equals(PROTOCOL)) {
+                    throw new IllegalStateException("Incompatible benchmark protocol: " + directory);
+                }
+            } else {
+                Path raw = directory.resolve("raw");
+                if (Files.isDirectory(raw)) {
+                    try (var paths = Files.list(raw)) {
+                        if (paths.anyMatch(path -> path.getFileName().toString().startsWith("benchmark-"))) {
+                            throw new IllegalStateException("Unversioned historical results must stay in a separate directory: " + directory);
+                        }
+                    }
+                }
+                Files.writeString(marker, PROTOCOL + "\n", StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
+            }
+        } catch (IOException exception) {
+            throw new IllegalStateException("Cannot prepare result directory", exception);
+        }
+    }
+
     public synchronized Artifacts write(List<BenchmarkResult> results, Path resultDirectory) {
         if (results.isEmpty()) throw new IllegalArgumentException("results must not be empty");
+        prepareDirectory(resultDirectory);
         Path rawDirectory = resultDirectory.resolve("raw");
         Path csvDirectory = resultDirectory.resolve("csv");
         Path chartDirectory = resultDirectory.resolve("charts");
@@ -36,30 +71,88 @@ public class ResultWriter {
             Files.createDirectories(rawDirectory);
             Files.createDirectories(csvDirectory);
             Files.createDirectories(chartDirectory);
-            String runId = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS").withZone(ZoneOffset.UTC).format(results.getFirst().measuredAt());
+            String runId = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS").withZone(ZoneOffset.UTC)
+                    .format(results.getFirst().measuredAt()) + "-" + UUID.randomUUID();
             Path json = rawDirectory.resolve("benchmark-" + runId + ".json");
-            objectMapper.writerWithDefaultPrettyPrinter().writeValue(json.toFile(), results);
+            writeAtomic(json, objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(results));
 
             Path csv = csvDirectory.resolve("vector-db-result.csv");
-            if (!Files.exists(csv)) {
-                Files.writeString(csv, CSV_HEADER, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
-            } else if (!Files.readString(csv, StandardCharsets.UTF_8).startsWith(CSV_HEADER)) {
-                throw new IllegalStateException("Existing CSV schema is incompatible; use a new benchmark result directory: " + csv);
-            }
-            StringBuilder rows = new StringBuilder();
-            results.forEach(result -> rows.append(toCsv(result)));
-            Files.writeString(csv, rows, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
-
-            Path chart = chartDirectory.resolve("recall-latency-" + runId + ".svg");
             List<BenchmarkResult> allResults = readAllResults(rawDirectory);
-            String plot = scatterPlot(allResults);
-            Files.writeString(chart, plot, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
-            Files.writeString(chartDirectory.resolve("recall-latency-latest.svg"), plot, StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-            return new Artifacts(json, csv, chart);
+            StringBuilder rows = new StringBuilder(CSV_HEADER);
+            allResults.forEach(result -> rows.append(toCsv(result)));
+            writeAtomic(csv, rows.toString());
+            Path chart = chartDirectory.resolve("recall-latency-latest.svg");
+            writeAtomic(chart, RecallLatencyPlot.svg(allResults, objectMapper, PROTOCOL));
+            Path summaryDirectory = resultDirectory.resolve("summary");
+            Files.createDirectories(summaryDirectory);
+            List<BenchmarkSummary.Group> summary = BenchmarkSummary.aggregate(allResults);
+            Path summaryJson = summaryDirectory.resolve("vector-db-summary.json");
+            Path summaryCsv = summaryDirectory.resolve("vector-db-summary.csv");
+            writeAtomic(summaryJson, objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(summary));
+            writeAtomic(summaryCsv, summaryCsv(summary));
+            return new Artifacts(json, csv, chart, summaryJson, summaryCsv);
         } catch (IOException exception) {
             throw new IllegalStateException("Cannot write benchmark results", exception);
         }
+    }
+
+    public synchronized void writeFailure(BenchmarkScenario scenario, RuntimeException failure, Path directory) {
+        try {
+            Path failures = directory.resolve("failures");
+            Files.createDirectories(failures);
+            writeAtomic(failures.resolve("failure-" + UUID.randomUUID() + ".json"),
+                    objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(Map.of(
+                            "scenario", scenario, "error", failure.toString(), "measuredAt", java.time.Instant.now(),
+                            "status", "execution_error", "completedMeasurementsPreserved", true)));
+        } catch (IOException exception) {
+            failure.addSuppressed(exception);
+        }
+    }
+
+    private void writeAtomic(Path target, String content) throws IOException {
+        Path temporary = Files.createTempFile(target.getParent(), ".report-", ".tmp");
+        try {
+            Files.writeString(temporary, content, StandardCharsets.UTF_8);
+            try {
+                Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException exception) {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    private String summaryCsv(List<BenchmarkSummary.Group> groups) {
+        List<String> metricNames = List.copyOf(groups.getFirst().metrics().keySet());
+        StringBuilder output = new StringBuilder("database,engine,index,index_parameters,search_parameters,vector_count,top_k,concurrency,warmup_iterations,measurement_iterations,environment,completed_measurements,run_numbers");
+        for (String metric : metricNames) {
+            for (String statistic : List.of("samples", "mean", "median", "p95", "p99", "min", "max", "sample_variance")) {
+                output.append(',').append(metric).append('_').append(statistic);
+            }
+        }
+        output.append('\n');
+        for (BenchmarkSummary.Group group : groups) {
+            var c = group.configuration();
+            List<String> cells = new ArrayList<>(List.of(csv(c.database()), csv(c.engine()), csv(c.indexType()),
+                    csv(objectMapper.writeValueAsString(c.indexParameters())), csv(objectMapper.writeValueAsString(c.searchParameters())),
+                    "" + c.vectorCount(), "" + c.topK(), "" + c.concurrency(), "" + c.warmupIterations(),
+                    "" + c.measurementIterations(), csv(objectMapper.writeValueAsString(c.environment())),
+                    "" + group.completedMeasurements(), csv(objectMapper.writeValueAsString(group.runNumbers()))));
+            for (String metric : metricNames) {
+                var d = group.metrics().get(metric);
+                cells.add("" + d.samples());
+                cells.add(csvNumber(d.mean()));
+                cells.add(csvNumber(d.median()));
+                cells.add(csvNumber(d.p95()));
+                cells.add(csvNumber(d.p99()));
+                cells.add(csvNumber(d.min()));
+                cells.add(csvNumber(d.max()));
+                cells.add(csvNumber(d.sampleVariance()));
+            }
+            output.append(String.join(",", cells)).append('\n');
+        }
+        return output.toString();
     }
 
     private List<BenchmarkResult> readAllResults(Path rawDirectory) throws IOException {
@@ -108,18 +201,15 @@ public class ResultWriter {
         cells.add(csv(result.database()));
         cells.add(csv(result.engine()));
         cells.add(csv(result.indexType()));
-        cells.add(decimal(result.targetRecall(), 6));
         cells.add(decimal(result.actualRecall(), 6));
         cells.add(decimal(result.comparisonRecall(), 6));
-        cells.add(decimal(result.recallTolerance(), 6));
-        cells.add(Boolean.toString(result.targetMet()));
-        cells.add(csv(result.calibrationSelection()));
-        cells.add(csvNumber(result.calibrationRecall()));
         cells.add(decimal(result.averageLatencyMs(), 6));
         cells.add(decimal(result.p50LatencyMs(), 6));
         cells.add(decimal(result.p95LatencyMs(), 6));
         cells.add(decimal(result.p99LatencyMs(), 6));
         cells.add(decimal(result.qps(), 3));
+        cells.add(Long.toString(result.measurementTimeMs()));
+        cells.add(Integer.toString(result.resourceSamples()));
         addSegment(cells, result.filtered());
         addSegment(cells, result.unfiltered());
         cells.add(decimal(result.averageCpuPercent(), 3));
@@ -152,6 +242,9 @@ public class ResultWriter {
         cells.add(decimal(segment.p50Ms(), 6));
         cells.add(decimal(segment.p95Ms(), 6));
         cells.add(decimal(segment.p99Ms(), 6));
+        cells.add(Integer.toString(segment.scoredQueries()));
+        cells.add(Integer.toString(segment.emptyGroundTruthQueries()));
+        cells.add(Integer.toString(segment.emptyGroundTruthViolations()));
     }
 
     private String decimal(double value, int scale) {
@@ -167,62 +260,6 @@ public class ResultWriter {
         return '"' + value.replace("\"", "\"\"") + '"';
     }
 
-    /**
-     * Filtered queries sit in the tail of the combined distribution, so the combined p95 reports
-     * filter cost rather than ANN tail behaviour. Plot the unfiltered tail whenever the run recorded it.
-     */
-    private double chartLatencyMs(BenchmarkResult result) {
-        return result.unfiltered().queryExecutions() > 0 ? result.unfiltered().p95Ms() : result.p95LatencyMs();
-    }
-
-    private double chartRecall(BenchmarkResult result) {
-        return result.comparisonRecall();
-    }
-
-    private String scatterPlot(List<BenchmarkResult> results) {
-        double maxLatency = Math.max(1, results.stream().mapToDouble(this::chartLatencyMs).max().orElse(1));
-        StringBuilder circles = new StringBuilder();
-        String[] colors = {"#2563eb", "#dc2626", "#059669", "#7c3aed", "#ea580c"};
-        Map<String, String> databaseColors = new LinkedHashMap<>();
-        for (int i = 0; i < results.size(); i++) {
-            BenchmarkResult result = results.get(i);
-            double latency = chartLatencyMs(result);
-            double x = 70 + (latency / maxLatency) * 680;
-            double recall = chartRecall(result);
-            double y = 350 - recall * 300;
-            String color = databaseColors.computeIfAbsent(result.database(),
-                    ignored -> colors[databaseColors.size() % colors.length]);
-            circles.append(String.format(Locale.ROOT,
-                    "<circle cx=\"%.2f\" cy=\"%.2f\" r=\"6\" fill=\"%s\"><title>%s / target %.2f / unfiltered p95 %.3f ms / comparison recall %.4f</title></circle>%n",
-                    x, y, color, escapeXml(result.database()), result.targetRecall(), latency, recall));
-        }
-        StringBuilder legend = new StringBuilder();
-        int legendX = 90;
-        for (Map.Entry<String, String> entry : databaseColors.entrySet()) {
-            legend.append("<circle cx=\"").append(legendX).append("\" cy=\"22\" r=\"5\" fill=\"")
-                    .append(entry.getValue()).append("\"/>")
-                    .append("<text x=\"").append(legendX + 9).append("\" y=\"26\" font-family=\"sans-serif\" font-size=\"11\">")
-                    .append(escapeXml(entry.getKey())).append("</text>\n");
-            legendX += 110;
-        }
-        return """
-                <svg xmlns="http://www.w3.org/2000/svg" width="800" height="420" viewBox="0 0 800 420">
-                  <rect width="800" height="420" fill="white"/>
-                  <line x1="70" y1="350" x2="760" y2="350" stroke="#111827"/>
-                  <line x1="70" y1="40" x2="70" y2="350" stroke="#111827"/>
-                  <text x="330" y="400" font-family="sans-serif" font-size="14">unfiltered p95 latency (ms)</text>
-                  <text x="18" y="210" transform="rotate(-90 18 210)" font-family="sans-serif" font-size="14">unfiltered Recall@K</text>
-                  <text x="70" y="370" font-family="sans-serif" font-size="11">0</text>
-                  <text x="720" y="370" font-family="sans-serif" font-size="11">%.2f</text>
-                  <text x="42" y="54" font-family="sans-serif" font-size="11">1.0</text>
-                %s%s</svg>
-                """.formatted(maxLatency, legend, circles);
-    }
-
-    private String escapeXml(String value) {
-        return value == null ? "" : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-    }
-
-    public record Artifacts(Path json, Path csv, Path chart) {
+    public record Artifacts(Path json, Path csv, Path chart, Path summaryJson, Path summaryCsv) {
     }
 }

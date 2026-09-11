@@ -12,13 +12,13 @@ public class BenchmarkProperties {
     private Path documentVectors = Path.of("data/embeddings/document-vectors.jsonl");
     private Path queryDefinitions = Path.of("data/queries/queries.jsonl");
     private Path queryVectors = Path.of("data/embeddings/query-vectors.jsonl");
-    private Path resultDirectory = Path.of("benchmark-result");
+    private Path resultDirectory = Path.of("benchmark-result/sweep-primary");
     private DistanceMetric metric = DistanceMetric.COSINE;
     private List<String> containerNames = new ArrayList<>();
     private int upsertBatchSize = 256;
-    private List<Integer> autoTuneCandidates = new ArrayList<>(List.of(10, 20, 40, 80, 120, 200, 400, 800, 1000));
+    private List<Integer> searchParameterValues = new ArrayList<>(List.of(10, 20, 40, 80, 120, 200, 400, 800, 1000));
     private int calibrationQueryCount = 100;
-    private double targetRecallTolerance = 0.01;
+    private long minimumMeasurementTimeMs = 5_000;
     private int driftDiagnosticRepetitions = 3;
     private double driftThreshold = 0.05;
     private double resourceBudgetCpu = 4.0;
@@ -40,14 +40,12 @@ public class BenchmarkProperties {
     }
     public int getUpsertBatchSize() { return upsertBatchSize; }
     public void setUpsertBatchSize(int upsertBatchSize) { this.upsertBatchSize = upsertBatchSize; }
-    public List<Integer> getAutoTuneCandidates() { return autoTuneCandidates; }
-    public void setAutoTuneCandidates(List<Integer> autoTuneCandidates) { this.autoTuneCandidates = autoTuneCandidates; }
+    public List<Integer> getSearchParameterValues() { return searchParameterValues; }
+    public void setSearchParameterValues(List<Integer> values) { this.searchParameterValues = values; }
     public int getCalibrationQueryCount() { return calibrationQueryCount; }
     public void setCalibrationQueryCount(int calibrationQueryCount) { this.calibrationQueryCount = calibrationQueryCount; }
-    public double getTargetRecallTolerance() { return targetRecallTolerance; }
-    public void setTargetRecallTolerance(double targetRecallTolerance) {
-        this.targetRecallTolerance = targetRecallTolerance;
-    }
+    public long getMinimumMeasurementTimeMs() { return minimumMeasurementTimeMs; }
+    public void setMinimumMeasurementTimeMs(long value) { minimumMeasurementTimeMs = value; }
     public int getDriftDiagnosticRepetitions() { return driftDiagnosticRepetitions; }
     public void setDriftDiagnosticRepetitions(int driftDiagnosticRepetitions) {
         this.driftDiagnosticRepetitions = driftDiagnosticRepetitions;

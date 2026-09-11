@@ -50,14 +50,13 @@ DB benchmark에서는 embedding 생성 시간을 latency에 포함하지 않는�
 ### 1. ANN 성능 비교
 각 query vector에 대해 Exact Top-K를 ground truth로 생성하고 ANN Top-K와 비교한다.
 
-`ANN Recall@10 = |Exact Top-10 ∩ ANN Top-10| / 10`
+`ANN Recall@10 = |Exact Top-10 ∩ ANN Top-10| / min(10, Exact 결과 수)`
 
-현재 T01~T28 주 비교 Target Recall@10은 0.90 / 0.95이며 허용 범위는 각 목표의 ±0.01이다.
-해당 범위에 드는 검색 설정이 없으면 후보 중 목표에 가장 가까운 실제 Recall을 사용하고
-`CLOSEST_AVAILABLE`로 표시한다. 과거 0.80과 보조 0.70 / 0.99는 현재 28-case 표에 섞지 않는다.
+정답이 빈 질의는 Recall 평균에서 제외하고 빈 결과 반환 여부를 별도 기록한다.
 
-300개 query는 calibration 100 / evaluation 200으로 고정 분할한다. 파라미터 선택에는
-calibration만, 최종 Recall·latency·QPS에는 evaluation만 사용한다.
+현재 14개 구성의 검색 파라미터 그리드를 전부 측정한다. Recall@10 0.90과 0.95는 산포도의 수평 참고선이며, 품질값으로 결과를 제거하지 않는다. 300개 query의 기존 분할은 유지하며 evaluation 200개로 모든 파라미터를 측정한다. calibration 100개는 추가 진단용이다. 이번 evaluation은 무필터 180개·필터 20개이며, 정답이 없는 필터 6개를 뺀 194개가 Recall 평균 대상이다.
+
+이 입력으로 [372개 전체 sweep 측정](../docs/07-results/sweep-results-20260911.md)을 완료했다. 실행 입력 해시와 결과 근거는 [고정 산출물 안내](../docs/07-results/assets/sweep-20260911-220549/README.md)에 연결한다.
 
 `workloads/filter-selectivity/`는 `generateFilterSelectivityWorkloads`가 만드는 파생 입력이다.
 embedding은 바꾸지 않고 metadata만 1%/10%/50% cohort로 확장한다.

@@ -4,22 +4,23 @@
     {
       "database": "",
       "indexType": "hnsw",
-      "targetRecall": 0.70,
       "topK": 10,
       "concurrency": 10,
       "warmupIterations": 1,
       "measurementIterations": 5,
-      "searchParameters": {}
-    },
-    {
-      "database": "",
-      "indexType": "hnsw",
-      "targetRecall": 0.99,
-      "topK": 10,
-      "concurrency": 10,
-      "warmupIterations": 1,
-      "measurementIterations": 5,
-      "searchParameters": {}
+      "searchParameters": {},
+      "repetitions": 3,
+      "searchParameterValues": [
+        10,
+        20,
+        40,
+        80,
+        120,
+        200,
+        400,
+        800,
+        1000
+      ]
     }
   ]
 }

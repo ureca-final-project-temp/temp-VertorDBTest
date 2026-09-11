@@ -1,92 +1,85 @@
 # 결과 형식
 
-현재 결과의 기준은 [2026-09-11 T01~T28 전체 실행 보고서](../07-results/matrix-results-20260911.md)입니다. 42회 인덱스 재구축과 84회 케이스 실행을 완료했습니다. 이 문서는 저장 형식을 설명하며, 기존 `eligible` 필드를 이번 보고서의 제품 선정 조건으로 사용하지 않습니다.
+현재 형식은 `search-parameter-sweep-v1`입니다. 모든 파라미터·반복의 실제 측정을 보존합니다. 결과에 목표 Recall의 합격 여부나 구성의 eligible 판정을 생성하지 않습니다.
 
 ## 디렉터리
 
 ```text
 <result-directory>/
-├─ raw/benchmark-*.json
+├─ protocol.txt
+├─ raw/benchmark-<timestamp>-<uuid>.json
 ├─ raw/ground-truth-top10.jsonl
 ├─ csv/vector-db-result.csv
 ├─ charts/recall-latency-latest.svg
+├─ summary/vector-db-summary.json
+├─ summary/vector-db-summary.csv
+├─ failures/failure-<uuid>.json
 ├─ logs/
 ├─ api-response-run-*.json
-├─ execution-order.json
-└─ summary/vector-db-summary.csv
+└─ execution-order.json
 ```
 
-CSV schema가 기존 파일과 다르면 이어 쓰지 않고 중단합니다. 하네스 변경 뒤에는 새 result directory를 사용합니다.
+각 점을 원시 JSON에 먼저 저장한 뒤 전체 원시값에서 CSV·집계·산포도를 다시 생성합니다. 같은 시각의 결과도 UUID로 구분합니다. 출력 파일 갱신은 임시 파일을 통한 교체로 수행합니다. 중간 실행 오류가 앞서 완료한 측정을 지우지 않습니다.
 
-## 원시 행 핵심 필드
+과거 CSV 스키마나 프로토콜 없는 과거 원시 파일이 있으면 새 디렉터리를 요구합니다. 이전 측정값을 새 프로토콜로 덮어쓰지 않습니다.
+
+## 이번 완료 실행의 고정 사본
+
+실행 디렉터리는 `benchmark-result/sweep-20260911-220549/`이고, 공유할 문서 근거는 [고정 산출물 디렉터리](../07-results/assets/sweep-20260911-220549/README.md)에 있습니다. 원시 372개 점, 동일 파라미터 집계 124개 그룹 × 3회, SVG 372개 점을 대조했습니다.
+
+`all-measurements.json`은 점별 원시 JSON을 한 배열로 모은 사본입니다. `run-manifest.json`, `validation.json`, `run-status.json`, 소스 압축 등은 이번 실행을 검증·보존하면서 추가한 근거 파일입니다. 일반 `run-all-benchmarks.ps1`이 이 부가 파일을 자동으로 모두 생성하는 것은 아닙니다.
+
+## 원시 행
 
 | 필드 | 의미 |
 |---|---|
-| `testId`, `runNumber` | T01~T28와 전체 재구축 회차 |
-| `database`, `engine`, `indexType` | 실제 어댑터 식별자 |
-| `targetRecall` | 0.90 또는 0.95 |
-| `actualRecall` | evaluation 전체(필터 포함) Recall |
-| `comparisonRecall` | evaluation 무필터 Recall. ANN 주 비교값 |
-| `recallTolerance` | 기본 0.01 |
-| `targetMet` | evaluation comparisonRecall이 목표 ±허용범위인지 |
-| `calibrationSelection` | `WITHIN_TOLERANCE`, `CLOSEST_AVAILABLE`, `EXPLICIT_PARAMETERS` |
-| `calibrationRecall` | 선택 당시 calibration 무필터 Recall |
-| `searchParameters` | 실제 ef/probes/nprobe/searchProbe/nprobes/candidate_k |
-| `filtered`, `unfiltered` | 모집단별 query count, Recall, 평균, p50/p95/p99 |
-| `qps` | evaluation search 완료 시간만 사용한 처리량 |
-| `averageCpuPercent`, `peakCpuPercent` | 대상 컨테이너 합산 CPU 평균/최대 |
-| `averageMemoryBytes`, `peakMemoryBytes` | 대상 컨테이너 합산 RAM 평균/최대 |
-| `indexSizeBytes` | 제품에서 분리 측정 가능한 인덱스 크기. 미지원 -1 |
-| `indexBuildTimeMs` | drop/create부터 적재·flush/refresh·ready까지 |
-| `upsertTimeMs` | 적재 API 구간 |
-| `stabilityDiagnostics` | Milvus serial/concurrent 표본과 전후 index/load/segment 상태. 다른 어댑터의 required=false는 진단 미실시 |
-| `environment` | 입력 SHA-256, query split SHA-256, Docker 제한, 실행 환경 |
+| testId, runNumber | 구성 식별자와 반복 번호 |
+| database, engine, indexType | 실제 어댑터 |
+| actualRecall | evaluation 전체의 scored 검색에 대한 Recall |
+| comparisonRecall | 무필터 Recall, 무필터가 없으면 전체 Recall로 대체하는 보조값 |
+| searchParameters, indexParameters | 실제 검색 폭과 생성 설정 |
+| averageLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs | 전체 evaluation의 요청 latency 통계 |
+| qps | 전체 검색 수 / 검색 작업 완료까지 걸린 시간 |
+| measurementTimeMs, resourceSamples | 실제 검색 구간의 길이(ms), 그 구간 안에서 수집한 자원 표본 수 |
+| filtered, unfiltered | 각 구간의 검색 수·Recall·latency와 빈 정답 검사 |
+| averageCpuPercent, peakCpuPercent | 대상 컨테이너 합산 CPU 표본의 평균/최대 |
+| averageMemoryBytes, peakMemoryBytes | 대상 컨테이너 합산 RAM 표본의 평균/최대 |
+| diskWriteBytes, indexSizeBytes | 표본 사이 디스크 쓰기 증가량과 제품별 인덱스/store 크기; 미지원 -1 |
+| indexBuildTimeMs, upsertTimeMs | 재구축부터 준비 완료까지, 적재 API 시간 |
+| stabilityDiagnostics | 별도 직렬/동시성 Recall 표본과 상태; 점 포함 여부를 결정하지 않음 |
+| environment, measuredAt | 입력/질의 분할 SHA-256, 환경·자원 조건, 측정 시각 |
 
-QPS 타이머 종료 후 Recall을 계산합니다. QPS는 필터·무필터가 섞인 전체 평가 검색의 처리량이고, 주 비교 p95는 무필터 구간입니다. Store 호출 시간에는 클라이언트 변환·통신·응답 처리도 들어가므로 DB 엔진 내부 시간만을 뜻하지 않습니다.
+QPS 분모와 latency에는 Recall 후처리와 결과 직렬화가 포함되지 않습니다. Store 호출 시간은 요청 변환·네트워크·응답 처리 비용을 포함합니다. 산포도는 전체 p95와 전체 actualRecall을 짝지어 표시합니다.
 
-## CSV 컬럼
+CSV는 동일 지표를 snake_case 52개 컬럼으로 저장합니다. 객체는 인용된 JSON 문자열입니다. 삭제한 필드는 `target_recall`, `recall_tolerance`, `target_met`, `calibration_selection`, `calibration_recall`입니다. Milvus 진단 안의 calibrationRecall은 진단용 첫 동시성 표본이며 목표 선택값이 아닙니다.
 
-```text
-test_id,run_number,database,engine,index,target_recall,actual_recall,comparison_recall,
-recall_tolerance,target_met,calibration_selection,calibration_recall,
-average_ms,p50_ms,p95_ms,p99_ms,qps,
-filtered_queries,filtered_recall,filtered_average_ms,filtered_p50_ms,filtered_p95_ms,filtered_p99_ms,
-unfiltered_queries,unfiltered_recall,unfiltered_average_ms,unfiltered_p50_ms,unfiltered_p95_ms,unfiltered_p99_ms,
-cpu_average_percent,cpu_max_percent,ram_average_bytes,ram_max_bytes,disk_write_bytes,
-index_size_bytes,time_to_index_ready_ms,upsert_ms,vector_count,query_executions,
-concurrency,top_k,warmup_iterations,measurement_iterations,
-stability_verified,stability_diagnostics,index_parameters,search_parameters,environment,measured_at
-```
+## 빈 정답 질의
 
-JSON 객체는 CSV에서 인용된 JSON 문자열입니다.
-
-## 집계 행
-
-`summary/vector-db-summary.csv`는 test ID별로 다음을 계산합니다.
-
-- completed runs
-- comparison Recall average/min/max
-- median unfiltered p95와 혼합 QPS
-- median average CPU, 전체 회차 peak CPU 최댓값, median RAM/index size/index build time
-- `within_target_tolerance`: Recall 평균이 해당 목표 ±0.01인지
-- `rebuild_recall_range`: 재구축 회차 간 comparison Recall max-min
-
-단일 실행 행의 `targetMet`과 반복 집계의 `within_target_tolerance`를 혼동하지 않습니다. 후자는 평균만 검사하며 개별 실행의 목표 충족 횟수는 원시 행의 `targetMet`에서 별도로 계산합니다. 중앙값 p95/RAM도 모든 회차의 최댓값을 제한하는 판정이 아닙니다.
-
-## 호환·기록용 legacy 판정 필드
-
-아래 필드는 현재 실행 스크립트가 기존 계산식을 유지해 출력하는 값입니다. **이번 84회 보고서의 제품 선정·탈락에는 사용하지 않습니다.** 기본 임계값은 이 비교 프로토콜의 품질·성능 판정 조건과 구분합니다.
-
-| 필드 | 현재 코드의 계산 |
+| 구간별 컬럼 | 의미 |
 |---|---|
-| `passes_recall_floor` | comparison Recall 평균 ≥ `DecisionRecallMinimum` (기본 0.95) |
-| `passes_p95` | unfiltered p95 중앙값 ≤ `DecisionP95LimitMs` (기본 30ms) |
-| `passes_ram` | peak RAM 중앙값 ≤ `DecisionRamLimitBytes` (기본 2GiB) |
-| `per_run_stability_verified` | 모든 행의 `stability_verified`가 true |
-| `rebuild_stability_verified` | 필수 진단 대상이면 Recall range ≤0.05, 비대상이면 true |
-| `stability_verified` | 위 두 안정성 집계값의 AND |
-| `eligible` | 반복 완료 AND Recall 하한 AND p95 AND RAM AND 기존 stability 조건 |
+| *_queries | 전체 검색 수 |
+| *_scored_queries | Recall 평균에 들어가는 검색 수 |
+| *_empty_ground_truth_queries | Exact 정답이 비어 있는 검색 수 |
+| *_empty_ground_truth_violations | 정답이 없는데 행을 반환한 검색 수 |
 
-`targetMet`과 `within_target_tolerance`는 `eligible` 계산에 직접 들어가지 않습니다. 따라서 목표 0.90을 충족해도 Recall 하한에는 미달할 수 있고, 반대로 목표를 크게 초과한 행도 하한은 통과할 수 있습니다.
+`*_queries = *_scored_queries + *_empty_ground_truth_queries`입니다. 정답이 비어 있으면 재현할 순위가 없으므로 Recall에 1.0을 더하지 않습니다. 빈 결과 반환 여부를 따로 검사하고 원시 점은 보존합니다.
 
-필수 안정성 진단은 현재 Milvus에만 적용됩니다. 다른 DB의 true는 동일한 진단 통과를 의미하지 않으므로 모든 DB의 회차별 변동을 원시 값으로 확인해야 합니다. OpenSearch는 기본 4GiB heap으로 측정했으므로 2GiB 메모리 필터 결과를 제품의 최소 운영 메모리 검증으로 읽지 않습니다. [비교 결과 해석 기준](../07-results/decision.md)에 구체적인 구분을 정리했습니다.
+## 반복 집계
+
+DB/engine/index, 생성 파라미터, **검색 파라미터**, 벡터 수, Top-K, 동시성, 워밍업·질의 반복 수, 데이터 해시·환경이 같은 측정만 한 행에 묶습니다. 원본 동기화의 실행별 시간 정보는 집계 키에서 제외합니다. test ID가 같아도 검색 파라미터가 다르면 다른 집계입니다.
+
+JSON의 `metrics`와 CSV의 지표별 접미사에 다음을 기록합니다.
+
+- samples: 해당 지표의 유효 표본 수
+- mean, median, p95, p99, min, max
+- sample_variance: n−1로 나눈 표본분산; 표본이 하나면 null
+
+예를 들어 `p95_ms_median`은 각 독립 측정의 p95 latency들에 대한 median입니다. `p95_ms_p95`는 그 p95 값들 사이의 95분위수입니다. 요청을 합쳐 계산한 p95와 다릅니다.
+
+원시 자원값 -1은 수집 불가입니다. 집계에서 유효 표본이 없으면 null(빈 CSV 셀)로 표시하며 원시값은 그대로 남깁니다. `completed_measurements`와 `run_numbers`는 실제 저장된 반복을 보여주며 Recall 통과 횟수가 아닙니다.
+
+## 산포도
+
+모든 실제 점을 X=p95(ms), Y=Recall@10에 표시합니다. 0.90·0.95 수평선은 참고선입니다. 점에 마우스를 올리면 DB/engine/index, 검색·생성 파라미터, 반복 번호와 성능·자원값을 볼 수 있습니다. 겹친 점도 원시 파일과 CSV에 각각 남습니다.
+
+[과거 84개 결과](../07-results/matrix-results-20260911.md)의 스키마와 목표 관련 필드는 역사 자료에만 남습니다. 그 원본을 새 sweep 측정으로 해석하지 않습니다.

@@ -29,7 +29,7 @@ public class ResourceCollector {
             thread.setDaemon(true);
             return thread;
         });
-        private final List<Snapshot> snapshots = new ArrayList<>();
+        private final List<TimedSnapshot> snapshots = new ArrayList<>();
         private Snapshot baseline;
 
         private Measurement(List<String> containerNames) {
@@ -43,24 +43,27 @@ public class ResourceCollector {
             // Keep the pre-run snapshot only as the Block I/O baseline. Including its idle CPU value
             // would severely under-report short benchmarks that finish before the first scheduled poll.
             baseline = captureSafely();
-            executor.scheduleWithFixedDelay(this::sampleSafely, 0, 500, TimeUnit.MILLISECONDS);
+            executor.scheduleWithFixedDelay(this::sampleSafely, 500, 500, TimeUnit.MILLISECONDS);
         }
 
         private void sampleSafely() {
+            long started = System.nanoTime();
             Snapshot snapshot = captureSafely();
+            long ended = System.nanoTime();
             if (snapshot == null) return;
             synchronized (snapshots) {
-                snapshots.add(snapshot);
+                snapshots.add(new TimedSnapshot(snapshot, started, ended));
             }
         }
 
         private Snapshot captureSafely() {
+            Process process = null;
             try {
                 List<String> command = new ArrayList<>(List.of(
                         "docker", "stats", "--no-stream", "--format",
                         "{{.CPUPerc}}|{{.MemUsage}}|{{.BlockIO}}"));
                 command.addAll(containerNames);
-                Process process = new ProcessBuilder(command)
+                process = new ProcessBuilder(command)
                         .redirectErrorStream(true)
                         .start();
                 if (!process.waitFor(3, TimeUnit.SECONDS) || process.exitValue() != 0) {
@@ -81,21 +84,27 @@ public class ResourceCollector {
                     diskWrite += blockIo.length < 2 ? 0 : parseBytes(blockIo[1].trim());
                     parsedContainers++;
                 }
-                if (parsedContainers == 0) return null;
+                if (parsedContainers != containerNames.size()) return null;
                 return new Snapshot(cpu, memory, diskWrite);
             } catch (IOException | InterruptedException | RuntimeException ignored) {
                 if (ignored instanceof InterruptedException) Thread.currentThread().interrupt();
                 return null;
+            } finally {
+                if (process != null && process.isAlive()) process.destroyForcibly();
             }
         }
 
-        public Usage usage() {
-            // The measured search phase can be shorter than one scheduled Docker sample.
-            // Take a final synchronous sample after the benchmark timer has stopped.
-            if (!containerNames.isEmpty()) sampleSafely();
+        public Usage usage(long searchStarted, long searchEnded) {
+            executor.shutdownNow();
             synchronized (snapshots) {
-                return summarize(baseline, snapshots);
+                return summarize(baseline, withinWindow(snapshots, searchStarted, searchEnded));
             }
+        }
+
+        static List<Snapshot> withinWindow(List<TimedSnapshot> snapshots, long searchStarted, long searchEnded) {
+            return snapshots.stream()
+                    .filter(sample -> sample.started() >= searchStarted && sample.ended() <= searchEnded)
+                    .map(TimedSnapshot::snapshot).toList();
         }
 
         static Usage summarize(Snapshot baseline, List<Snapshot> measured) {
@@ -106,7 +115,7 @@ public class ResourceCollector {
             long peakMemory = measured.stream().mapToLong(Snapshot::memoryBytes).max().orElse(-1);
             long firstWrite = baseline == null ? measured.getFirst().diskWriteBytes() : baseline.diskWriteBytes();
             long lastWrite = measured.getLast().diskWriteBytes();
-            return new Usage(averageCpu, peakCpu, averageMemory, peakMemory, Math.max(0, lastWrite - firstWrite));
+            return new Usage(averageCpu, peakCpu, averageMemory, peakMemory, Math.max(0, lastWrite - firstWrite), measured.size());
         }
 
         @Override
@@ -139,13 +148,16 @@ public class ResourceCollector {
     record Snapshot(double cpuPercent, long memoryBytes, long diskWriteBytes) {
     }
 
+    record TimedSnapshot(Snapshot snapshot, long started, long ended) { }
+
     public record Usage(
             double averageCpuPercent,
             double peakCpuPercent,
             long averageMemoryBytes,
             long peakMemoryBytes,
-            long diskWriteBytes
+            long diskWriteBytes,
+            int samples
     ) {
-        public static final Usage UNAVAILABLE = new Usage(-1, -1, -1, -1, -1);
+        public static final Usage UNAVAILABLE = new Usage(-1, -1, -1, -1, -1, 0);
     }
 }

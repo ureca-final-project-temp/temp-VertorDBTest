@@ -64,7 +64,7 @@ Map<Integer, Map<String, List<VectorSearchResult>>> groundTruthByTopK = new Link
 groundTruthByTopK.computeIfAbsent(scenario.topK(), ignored -> exactGroundTruth(...));
 ```
 
-목표 3개가 모두 `topK=10`이므로 실제로는 한 번만 계산됩니다.
+현재 행렬은 모두 `topK=10`이므로 한 번의 `BenchmarkRunner.run()` 호출 안에서 같은 정답지를 재사용합니다. 외부 실행 스크립트가 다음 구성을 시작하면 해당 호출에서 다시 계산합니다. 파라미터마다 정답을 바꾸지 않습니다.
 
 ## 산출물
 
@@ -77,6 +77,19 @@ benchmark-result/<dir>/raw/ground-truth-top10.jsonl
 ```
 
 이 파일로 다른 도구에서 Recall을 독립 재검산할 수 있습니다.
+
+## 정답이 비어 있는 질의
+
+필터가 어떤 문서와도 매칭되지 않으면 exact 정답이 0개입니다. 제공 데이터에서는
+evaluation 필터 질의 20개 중 6개, calibration 1개가 여기 해당합니다.
+
+이런 질의는 **재현할 순위가 없으므로 Recall 평균에서 뺍니다.** DB도 빈 결과를 반환했는지 별도 기록합니다.
+
+행을 반환하면 Exact 필터 조건과의 불일치로 `empty_ground_truth_violations`를 증가시킵니다. 이는 Recall 목표 판정이 아니며 해당 측정 점은 계속 보존합니다.
+Recall 평균에 1.0으로 섞으면 이 결함이 만점으로 기록됩니다.
+
+`*_scored_queries`, `*_empty_ground_truth_queries`, `*_empty_ground_truth_violations` 세 컬럼에
+구간별로 근거가 남습니다. [result-format.md](../06-implementation/result-format.md)를 봅니다.
 
 ## 신뢰 조건
 

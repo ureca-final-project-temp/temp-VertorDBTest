@@ -59,8 +59,7 @@ IllegalStateException: Qdrant payload index is missing for [metadata.tenant_id];
 filtered search would fall back to a full scan
 ```
 
-**이것은 버그가 아니라 의도된 차단입니다.** payload index 없이 측정하면
-필터 질의가 full scan이 되어 결과가 무효가 됩니다.
+선언한 payload index가 없어 실행 조건을 충족하지 못한 상태입니다. 준비 조건 오류와 실제 측정에서 낮은 Recall이 나온 경우를 구분합니다.
 
 ### 진단
 
@@ -138,8 +137,7 @@ docker compose --profile qdrant up -d --force-recreate qdrant
 
 ## 자원 값이 전부 -1
 
-`cpu_percent`, `peak_memory_bytes`, `disk_write_bytes`가 모두 `-1`이면
-`docker stats`를 한 번도 성공하지 못한 것입니다.
+현재 CSV의 `cpu_average_percent`, `cpu_max_percent`, `ram_average_bytes`, `ram_max_bytes`가 `-1`이고 `resource_samples=0`이면 유효한 검색 구간 내부 표본이 없다는 뜻입니다. 수집 실패뿐 아니라 표본 수집 시간이 검색 구간을 벗어났을 수도 있습니다. 원시 -1을 지우거나 0으로 바꾸지 않습니다.
 
 ### 진단
 
@@ -151,6 +149,7 @@ docker stats --no-stream --format "{{.CPUPerc}}|{{.MemUsage}}|{{.BlockIO}}" vect
 
 - Docker 소켓 권한 확인
 - 프로필 YAML의 `benchmark.container-names`가 실제 컨테이너 이름과 일치하는지 확인
+- `measurement_time_ms`와 `resource_samples` 확인; 검색 구간은 최소 5초로 유지
 
 ```yaml
 benchmark.container-names: [vector-qdrant]
@@ -160,20 +159,30 @@ benchmark.container-names: [vector-qdrant]
 
 ## CPU가 0.01% 같은 비현실적인 값
 
-`docker stats`는 약 1초 집계창을 가집니다. 전체 측정 구간이 그보다 짧으면
-CPU 평균이 심하게 과소 집계됩니다.
+짧은 검색이 끝난 뒤 유휴 CPU 표본을 합치면 부하 중 사용량이 과소 집계될 수 있습니다. 실제로 최초 sweep 시도 `sweep-20260911-215805`의 26개 기록에서 계측 문제를 발견했습니다. 해당 기록과 중단 사유는 별도로 보존했습니다.
 
-수십 ms짜리 smoke run에서는 정상입니다. **그 행을 자원 비교에서 제외합니다.**
+현재 구현은 1,000요청 단위를 최소 5초 이상 반복하고, 수집 시작·종료가 모두 검색 구간 안인 표본만 평균·최대에 사용합니다. 종료 직후 유휴 표본을 추가하지 않습니다. 실행 스크립트의 `-MinimumMeasurementTimeMs 5000` 또는 애플리케이션의 `benchmark.minimum-measurement-time-ms`를 확인합니다.
 
-본실험에서 나타나면 측정 요청 수를 늘립니다(`measurementIterations`).
+재측정한 [전체 372개 결과](../07-results/sweep-results-20260911.md)는 검색 구간이 최소 5,001ms, 자원 표본이 최소 2개이고 CPU·RAM 누락은 0개였습니다. 숫자가 작다는 이유만으로 버리지 않고 수집 시점·실제 부하·표본 수를 함께 확인합니다.
+
+---
+
+## Recall이 0.90 또는 0.95를 넘지 않는다
+
+검색 파라미터의 실제 품질 관측입니다. Recall만으로 실행을 실패 처리하거나 구성·측정값을 제거하지 않습니다. 새 실험의 Milvus IVF_PQ 27개 점도 Recall 0.492268–0.611856 범위 그대로 보존했습니다. 전체 그리드와 산포도에서 비용 대비 품질을 해석합니다.
+
+---
+
+## 실행 중 CSV 갱신이 실패한다
+
+Windows에서 CSV를 독점적으로 연 프로그램은 Java의 임시 파일 교체를 막을 수 있습니다. 파일을 연 도구를 확인하고, 실행 중 조회는 `FileShare.ReadWrite | FileShare.Delete`로 읽습니다. 이번 실행의 로컬 `benchmark-result/sweep-20260911-220549/provenance/progress.ps1`이 그 예입니다. 일반 `Import-Csv` 예시는 실행 완료 뒤 사용합니다.
 
 ---
 
 ## Existing CSV schema is incompatible
 
 ```text
-IllegalStateException: Existing CSV schema is incompatible;
-use a new benchmark result directory: ...
+IllegalStateException: Existing CSV uses the old protocol; choose a new result directory: ...
 ```
 
 결과 CSV 컬럼이 바뀌었는데 예전 디렉터리에 이어 쓰려 했습니다.
@@ -190,7 +199,7 @@ use a new benchmark result directory: ...
 
 ## Recall이 0에 가깝다
 
-거의 항상 **id 불일치**입니다. Ground Truth의 id와 DB가 반환한 id가 다릅니다.
+낮은 Recall 자체는 실패가 아닙니다. 예상과 크게 다르면 원본 id 매핑, 입력 해시·차원·metric, 필터, 실제 적용한 검색 폭과 준비 상태를 확인합니다. id 불일치는 가능한 원인 중 하나입니다.
 
 ### 진단
 
@@ -210,12 +219,12 @@ Qdrant와 Weaviate는 내부 id로 UUID를 씁니다. 어댑터가 변환된 UUI
 
 ## Recall이 1.0에 가깝고 latency가 비정상적으로 낮다
 
-HNSW가 아니라 exact scan을 측정하고 있을 가능성이 큽니다.
+높은 Recall과 낮은 latency만으로 오류를 판정하지 않습니다. 의도한 인덱스 경로가 맞는지 확인할 필요가 있을 때 다음 상태를 점검합니다.
 
 | DB | 확인 |
 |---|---|
 | Qdrant | `indexed_vectors_count`가 전체 건수인지 |
-| Milvus | `indexState=Finished`, `pendingRows=0`인지 |
+| Milvus | index/load 상태와 query-node Sealed/Flushed segment row 합계 |
 | pgvector | `enable_seqscan=off`가 적용됐는지 (`force-index-scan: true`) |
 
 `awaitReady()`가 이 장벽을 담당하지만, 임계값 설정이 바뀌면 우회될 수 있습니다.
@@ -224,7 +233,7 @@ HNSW가 아니라 exact scan을 측정하고 있을 가능성이 큽니다.
 
 ## ef를 올려도 latency가 변하지 않는다
 
-탐색 파라미터가 적용되지 않았거나, 그 경로가 HNSW를 타지 않고 있습니다.
+검색 폭에 대한 latency 변화가 작을 수 있습니다. 미적용·다른 검색 경로 외에도 작은 데이터, 품질 포화, 클라이언트 비용, 반복 변동이 원인 후보입니다. 관측만으로 특정 원인을 확정하지 않습니다.
 
 1. 어댑터가 파라미터를 실제로 전송하는지 확인합니다.
 2. Weaviate는 요청별이 아니라 스키마 설정입니다. `configureSearch()`가 호출됐는지 확인합니다.

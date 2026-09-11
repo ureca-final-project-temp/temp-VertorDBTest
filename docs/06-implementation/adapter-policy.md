@@ -13,8 +13,7 @@ pgvector를 제외한 네 DB의 적재·검색 경로는 모두 Java 표준 `Htt
 // client-library overhead is controlled. pgvector uses JDBC by necessity.
 ```
 
-제품별 공식 SDK는 커넥션 풀, 재시도, 직렬화 최적화 수준이 제각각입니다.
-그 차이가 latency에 섞이면 "DB 비교"가 아니라 "SDK 비교"가 됩니다.
+제품별 공식 SDK는 커넥션 풀, 재시도, 직렬화 최적화 수준이 다릅니다. 이 하네스는 HTTP 클라이언트를 공유하되 JDBC·JSON·GraphQL의 프로토콜 차이는 남습니다. 따라서 결과는 현재 어댑터를 포함한 검색 경로의 비교입니다.
 
 Milvus 공식 Java SDK는 검색 timer 밖의 `getQuerySegmentInfo` 진단에만 사용합니다.
 pgvector만 검색 경로에서 JDBC를 쓰는 비대칭은
@@ -37,7 +36,7 @@ DB가 잘못된 결과를 주면 그대로 반환합니다. Recall이 떨어져�
 
 ## 3. 원본 id를 반환합니다
 
-Qdrant와 Weaviate는 id로 UUID만 받습니다. 변환은 결정론적이어야 하고
+이 하네스는 Qdrant와 Weaviate의 내부 id를 UUID로 변환합니다(Qdrant는 정수 id도 지원). 변환은 결정론적이어야 하고
 원본 id는 payload/property에 보관해 검색 결과에서 그대로 꺼냅니다.
 
 ```java
@@ -69,8 +68,8 @@ VectorHttpSupport.validateDimensions(documents, properties.getDimension());
 
 ## 6. 검색 파라미터를 무시하지 않습니다
 
-자동 튜닝은 파라미터를 바꾸면 Recall이 바뀐다는 전제 위에서 동작합니다.
-어댑터가 파라미터를 버리면 튜닝이 무의미해지고, 그 사실이 결과에 드러나지 않습니다.
+이 실험은 파라미터 변화에 따른 Recall·성능 변화를 측정합니다.
+어댑터가 파라미터를 무시하면 서로 다른 설정을 측정한 것으로 잘못 기록하게 됩니다.
 
 파라미터를 요청별로 보낼 수 없는 제품은 `configureSearch()`를 재정의해 반영합니다(Weaviate).
 
@@ -84,9 +83,9 @@ VectorHttpSupport.validateDimensions(documents, properties.getDimension());
 준비되지 않은 상태로 측정하면 exact 또는 전환 경로 수치를 ANN 수치로 기록하게 됩니다.
 Milvus는 index/load REST 상태뿐 아니라 query node의 Sealed/Flushed segment와 row 합계까지 확인합니다.
 
-## 8. 조용한 성능 저하는 예외로 바꿉니다
+## 8. 선언한 실행 조건의 누락을 측정 전에 검사합니다
 
-설정 누락 때문에 제품이 느린 경로로 빠지면, 그 상태의 숫자를 측정하는 대신 실패해야 합니다.
+준비 상태, 필수 인덱스, 입력 차원·건수, 자원 상한이 선언과 다르면 실행 오류로 처리합니다. 이는 낮은 Recall이나 느린 latency를 탈락시키는 규칙이 아닙니다. 조건이 충족된 뒤 얻은 모든 성능·품질 관측은 보존합니다.
 
 ```java
 if (!missing.isEmpty()) {

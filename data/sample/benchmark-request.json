@@ -4,32 +4,23 @@
     {
       "database": "",
       "indexType": "hnsw",
-      "targetRecall": 0.80,
       "topK": 3,
       "concurrency": 2,
       "warmupIterations": 1,
       "measurementIterations": 3,
-      "searchParameters": {}
-    },
-    {
-      "database": "",
-      "indexType": "hnsw",
-      "targetRecall": 0.90,
-      "topK": 3,
-      "concurrency": 2,
-      "warmupIterations": 1,
-      "measurementIterations": 3,
-      "searchParameters": {}
-    },
-    {
-      "database": "",
-      "indexType": "hnsw",
-      "targetRecall": 0.95,
-      "topK": 3,
-      "concurrency": 2,
-      "warmupIterations": 1,
-      "measurementIterations": 3,
-      "searchParameters": {}
+      "searchParameters": {},
+      "repetitions": 3,
+      "searchParameterValues": [
+        10,
+        20,
+        40,
+        80,
+        120,
+        200,
+        400,
+        800,
+        1000
+      ]
     }
   ]
 }

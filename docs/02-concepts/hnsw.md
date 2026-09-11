@@ -25,12 +25,11 @@ Layer 0    ●─●─●─●─●─●─●─●─●          전체 �
 | `ef_construction` | 인덱스 생성 | 생성 시 탐색 후보 수 | 그래프 품질 ↑, 빌드 시간 ↑ |
 | `ef_search` | 검색 | 검색 시 탐색 후보 수 | Recall ↑, latency ↑ |
 
-**생성 파라미터는 인덱스를 다시 만들어야 바뀌고, 검색 파라미터는 질의마다 바꿀 수 있습니다.**
-그래서 Recall 튜닝은 검색 파라미터로 합니다.
+**생성 파라미터를 바꾸면 재구축이 필요하고, 검색 폭은 재구축 없이 바꿀 수 있습니다.** 적용 위치는 요청·세션·클래스 설정으로 제품마다 다릅니다. 위 화살표는 일반적인 경향이며 모든 실측 점의 단조 증가를 보장하지 않습니다.
 
 ## 이 프로젝트의 고정값
 
-생성 파라미터는 전 DB 동일합니다.
+주 행렬의 HNSW 생성 파라미터는 다음 값으로 맞춥니다. IVF·HFresh·DISKANN에는 별도 생성 설정을 사용합니다.
 
 ```text
 M = 16
@@ -45,43 +44,28 @@ ef_construction = 128
 | Qdrant | `hnsw_ef` | 요청 body의 `params` |
 | Weaviate | `ef` | 클래스 스키마 갱신 (요청별 지정 불가) |
 | Milvus | `ef` | 요청 body의 `searchParams.params` |
-| OpenSearch | `ef_search` | knn 쿼리의 `method_parameters` |
+| OpenSearch Faiss HNSW | `ef_search` | knn 쿼리의 `method_parameters` |
+| OpenSearch Lucene HNSW | `candidate_k` | 요청 후보 `k` 변경, 반환 Top-10 유지 |
 
-`BenchmarkRunner`가 DB별로 올바른 키를 고릅니다.
+`VectorIndexManager.searchParameterName()`이 엔진별 키를 제공합니다. OpenSearch Lucene/JVector는 `candidate_k`, Faiss HNSW는 `ef_search`를 사용합니다.
 
-```java
-String key = switch (store.database().toLowerCase()) {
-    case "qdrant" -> "hnsw_ef";
-    case "weaviate", "milvus" -> "ef";
-    default -> "ef_search";
-};
-```
+## 전체 파라미터 sweep
 
-## 자동 튜닝
-
-`searchParameters: {}`로 요청하면 후보 `[10, 20, 40, 80, 120, 200, 400, 800, 1000]` 전체를
-calibration 100개 중 무필터 질의에 대해 본 측정과 같은 warm-up·동시성·반복 횟수로 시험한 뒤,
-목표 Recall 구간에 드는 **가장 작은** 값을 고릅니다.
-
-```text
-ef_search=10   → Recall 0.71
-ef_search=20   → Recall 0.79
-ef_search=40   → Recall 0.86
-ef_search=80   → Recall 0.91   ← 목표 0.90 ±0.01 충족, 여기서 선택
-ef_search=120  → Recall 0.93
-```
-
-구간에 드는 후보가 없으면 목표와 가장 가까운 후보를 고르고 `CLOSEST_AVAILABLE`로 기록합니다.
-이 표시가 붙은 행은 "동일 Recall 비교"에 사용할 수 없습니다.
-`WITHIN_TOLERANCE`여도 본 측정의 `target_met=false`이면 튜닝 이후 Recall이 변한 것이므로
-직접 비교에서 제외합니다.
-
-명시값을 쓰려면 시나리오에 직접 넣습니다.
+`searchParameters: {}`이면 `searchParameterValues` 또는 기본 그리드 전체를 측정합니다. 예를 들어 `[16, 32, 64, 96, 128]`에서 각 값의 Recall·latency·QPS·CPU·RAM을 모두 저장합니다. `repetitions: 3`은 이 고정 그리드를 세 번 반복합니다.
 
 ```json
-"searchParameters": {"ef_search": 120}
+{"searchParameters": {}, "searchParameterValues": [16, 32, 64, 96, 128], "repetitions": 3}
 ```
 
+Recall이 0.90·0.95를 넘더라도 측정을 계속합니다. 단조성 보정이나 목표 구간 선택을 적용하지 않습니다. 모든 실제 점을 X=p95, Y=Recall에 그리고 0.90·0.95를 참고선으로 표시합니다.
+
+고정 파라미터만 반복할 때는 그리드를 생략합니다.
+
+```json
+{"searchParameters": {"ef_search": 120}, "repetitions": 3}
+```
+
+Weaviate는 검색 폭을 클래스 스키마로 적용하므로 파라미터별 실행은 순차적으로 진행합니다. 한 파라미터 안의 질의만 지정한 동시성으로 처리합니다.
 ## 주의: 비동기 인덱싱
 
 여러 DB가 적재 직후 인덱스를 아직 만들지 않은 상태로 검색을 받습니다.
@@ -91,14 +75,14 @@ ef_search=120  → Recall 0.93
 
 - **Qdrant** — `indexed_vectors_count`가 전체 건수에 도달하고 status가 `green`이 될 때까지 대기.
   exact-scan 임계값 아래에서는 이 건수 대기만 생략하고 payload index 검증은 수행
-- **Milvus** — `flush` 후 `indexState=Finished`, `indexedRows >= 전체`, `pendingRows == 0`까지 대기
-- **OpenSearch** — bulk 적재에 `refresh=wait_for`
-- **pgvector / Weaviate** — 동기 경로라 별도 장벽 없음
+- **Milvus** — flush·index·load 상태와 query-node의 Sealed/Flushed segment row 합계를 확인
+- **OpenSearch** — 전체 적재 뒤 refresh와 force-merge 완료를 기다림
+- **Weaviate** — object count와 비동기 인덱싱의 `vectorQueueLength=0` 확인
+- **pgvector** — 적재 건수 확인; IVFFlat은 적재 후 인덱스를 생성하며 HNSW는 생성한 인덱스에 적재
 
 ## 주의: ef를 올려도 느려지지 않는 구간
 
-`ef`를 크게 올렸는데 특정 percentile이 반응하지 않으면, 그 경로는 HNSW를 타고 있지 않다는 뜻입니다.
-대부분 필터 필드의 index 누락이 원인입니다.
+`ef`를 올려도 특정 percentile이 비슷하면 파라미터 적용, 필터 경로, 준비 상태를 확인합니다. 검색 품질 포화, 작은 데이터, 클라이언트 비용과 반복 변동도 영향을 줄 수 있으므로 latency만으로 HNSW 미사용을 단정하지 않습니다.
 
 실제 사례는 [../07-results/analysis.md](../07-results/analysis.md)에 있습니다.
 

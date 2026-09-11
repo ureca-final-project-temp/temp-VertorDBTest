@@ -8,13 +8,15 @@
 | source of truth | 같은 document/chunk snapshot | PostgreSQL 동기화 및 hash/count 검증 |
 | metric | cosine | store와 불일치 시 거부 |
 | topK | 10 | matrix runner |
-| target Recall | 0.90, 0.95 ±0.01 | matrix와 selector |
+| 품질 참고선 | Recall 0.90, 0.95 | 산포도 수평선; 결과 판정 없음 |
 | query split | calibration 100 / evaluation 200 | query-type 층화 SHA-256 |
-| 부하 | concurrency 10, warm-up 1, measurement 5 | matrix runner |
+| 부하 | concurrency 10, warm-up 1, measurement 5, 최소 5초 | matrix runner |
 | 반복 | 3~5 전체 재구축 | 스크립트 parameter validation |
 | 자원 | 대상 합계 4 vCPU / 8GiB / swap 없음 | `docker inspect` 불일치 시 중단 |
 
 인덱스 생성 파라미터는 결과의 `index_parameters`, 검색 폭은 `search_parameters`에 기록합니다. 서로 다른 계열에 존재하지 않는 파라미터를 억지로 같게 만들지 않습니다.
+
+이번 [완료 실행](../07-results/sweep-results-20260911.md)은 3회 재구축·372개 점이며, 동일 입력 해시·부하 조건과 점별 최소 5초 측정을 확인했습니다. 검색 파라미터는 구성 안에서 오름차순으로 실행했으므로 실행 순서·캐시·JIT 영향을 완전히 분리하지 않았습니다.
 
 ## 버전
 

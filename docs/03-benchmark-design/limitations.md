@@ -6,7 +6,8 @@
 
 - 실제로 임베딩한 100k/1M 데이터
 - 실제 프로젝트 FAQ/chunk/query 분포
-- 전체 T01~T28의 새 프로토콜 공식 결과
+
+14개 구성 전체 파라미터 sweep은 [10k 합성 데이터의 372개 실측](../07-results/sweep-results-20260911.md)을 완료했습니다. 위의 대규모·실제 데이터 결과와는 구분합니다.
 
 행이나 같은 벡터를 복제해 100k라고 부르지 않습니다. 실제 입력이 들어오면 전용 스크립트가 최소 건수와 synthetic 표식을 검사합니다.
 
@@ -20,7 +21,7 @@
 
 ## Recall 품질점
 
-후보 그리드에 목표 ±0.01이 없으면 `calibration_selection=CLOSEST_AVAILABLE`을 기록합니다. independent evaluation의 `target_met`은 달라질 수 있습니다. 서로 다른 실제 Recall의 latency를 같은 품질점처럼 직접 비교하지 않습니다.
+그리드가 성기면 0.90·0.95 참고 수준을 건너뛸 수 있습니다. 이는 실패가 아닙니다. 모든 실제 점을 보존하고 관측되지 않은 Recall 수준의 성능을 실측처럼 제시하지 않습니다.
 
 ## 필터
 
@@ -28,11 +29,11 @@
 
 ## 자원 샘플
 
-Docker stats sampling은 약 500ms 주기입니다. 매우 짧은 측정은 CPU sample이 적을 수 있습니다. OpenSearch는 4GiB heap을 선점하므로 RSS를 실제 live heap처럼 해석하지 않습니다. index size `-1`은 0이 아니라 제품 API 미지원입니다.
+Docker stats 명령 완료 후 약 500ms 간격으로 다시 수집합니다. 명령 자체의 시간도 있으므로 정확한 500ms 주기는 아닙니다. 검색 구간 안에서 수집을 시작하고 마친 표본만 집계하며 측정 후 유휴 표본은 사용하지 않습니다. 이번 372개 측정은 각 점을 최소 5초 실행했고 자원 표본은 최소 2개였습니다. 이는 연속 관측이 아니므로 순간 peak를 모두 포착하거나 정밀한 자원 분포를 보장하지 않습니다. OpenSearch는 4GiB heap을 선점하므로 RSS를 실제 live heap처럼 해석하지 않습니다. index size `-1`은 0이 아니라 제품 API 미지원입니다.
 
 ## warm cache
 
-튜닝과 warm-up 후 측정하므로 결과는 warm-cache 조건입니다. cold start, 장애 복구, 재색인 중 읽기, write/read 혼합, backup/restore, rolling upgrade는 별도 시험이 필요합니다.
+파라미터 적용과 200요청 warm-up 후 측정합니다. 구성 안 검색 폭은 오름차순이며, warm-up만으로 캐시·JIT의 안정 상태를 보장하지 않습니다. cold start, 장애 복구, 재색인 중 읽기, write/read 혼합, backup/restore, rolling upgrade는 별도 시험이 필요합니다.
 
 ## 통계
 
@@ -40,4 +41,4 @@ Docker stats sampling은 약 500ms 주기입니다. 매우 짧은 측정은 CPU 
 
 ## 실제 제품 결정
 
-기본 의사결정 규칙을 통과한 후보끼리 운영 복잡도, 정합성, 장애 복구, 관측성, scale-out 요구를 비교합니다. 과거 단일 실행 결과는 [docs/07-results](../07-results/)에 보존하지만 현재 순위표로 사용하지 않습니다.
+품질·성능·자원 trade-off를 확인한 뒤 운영 복잡도, 정합성, 장애 복구, 관측성, scale-out 요구를 비교합니다. 과거 단일 실행 결과는 [docs/07-results](../07-results/)에 보존하지만 현재 순위표로 사용하지 않습니다.

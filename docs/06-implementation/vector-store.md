@@ -18,9 +18,9 @@ public interface VectorStore {
 
 | 메서드 | 계약 |
 |---|---|
-| `database()` | 결과 파일에 기록되는 소문자 식별자. 튜닝 파라미터 키 선택에도 쓰임 |
+| `database()` | 결과 파일에 기록되는 소문자 식별자; 검색 파라미터 키는 IndexManager가 제공 |
 | `dimension()` / `metric()` | 실행 전 입력과 대조. 불일치 시 벤치마크가 거부 |
-| `upsert()` | 같은 `id`면 덮어씀. 호출 반환 시 조회 가능해야 함 |
+| `upsert()` | 같은 `id`면 덮어씀. 적재 요청을 완료함. 검색 준비 완료는 `awaitReady()`와 건수 검증으로 확인 |
 | `search()` | **측정 타이머가 감싸는 유일한 메서드.** 높을수록 좋은 score로 정규화해 반환 |
 | `count()` | 정확한 건수. 적재 검증에 사용 |
 
@@ -41,8 +41,10 @@ Weaviate는 `1 - distance`, Milvus는 EUCLIDEAN일 때 `-distance`로 변환합�
 ```java
 public interface VectorIndexManager {
     String indexType();
-    String engine();
-    String searchParameterName();
+    default String engine() { return "Native"; }
+    default String searchParameterName() { return null; }
+    default int minimumSearchParameter(int topK) { return topK; }
+    default int maximumSearchParameter() { return Integer.MAX_VALUE; }
     void create();
     void drop();
 
@@ -63,7 +65,8 @@ default 구현이 있는 메서드는 **필요한 제품만 재정의합니다.*
 |---|---|---|
 | `rebuild(documents)` | OpenSearch Faiss IVF | model training이 먼저 필요 |
 | `configureSearch()` | Weaviate | `ef`/`searchProbe`가 요청별이 아니라 클래스 설정 |
-| `awaitReady()` | Qdrant, Weaviate, Milvus, OpenSearch | 비동기 인덱싱/refresh/load 완료 장벽 |
+| `awaitReady()` | 다섯 DB 모두 | 적재 건수·인덱스 생성·비동기 준비 상태 확인 |
+| `minimumSearchParameter()` / `maximumSearchParameter()` | IVF 계열 등 | 전체 그리드를 측정 전에 허용 범위와 대조 |
 | `diagnostics()` | Milvus | index/load/query-segment 상태와 drift 근거 |
 | `indexSizeBytes()` | pgvector, OpenSearch | 나머지는 미지원(`-1`) |
 
