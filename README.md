@@ -133,6 +133,8 @@ Milvus의 4 vCPU/8 GiB는 Milvus·etcd·MinIO 합계입니다. 실행기는 `doc
 
 집계의 p95/p99는 반복 측정 지표 사이의 분위수입니다. 개별 점의 p95/p99는 해당 점의 검색 요청 사이의 분위수입니다. CPU/RAM 수집 불가는 원시에 -1, 집계에는 null과 표본 수로 남깁니다.
 
+Qdrant가 더 빠르지만, 현재 서비스에는 pgvector도 충분히 빠릅니다. 따라서 현재는 운영 복잡도가 낮은 pgvector를 선택하고, 향후 pgvector가 서비스 SLO를 충족하지 못하는 시점에 성능 우위가 검증된 Qdrant를 분리 도입할 예정입니다.
+
 Milvus의 별도 안정성 진단은 참고 정보로 보존하며 산포도 점이나 구성을 제거하지 않습니다. 세부 사항은 [현재 프로토콜](docs/03-benchmark-design/current-protocol.md)과 [결과 형식](docs/06-implementation/result-format.md)을 확인합니다.
 ## 문서
 
